@@ -64,14 +64,17 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
-	// first-boot admin
-	generated, err := auth.EnsureAdmin(st.DB, cfg.AdminUser, cfg.AdminPass)
+	// built-in admin: create on first boot, or sync to configured password
+	generated, reset, err := auth.EnsureAdmin(st.DB, cfg.AdminUser, cfg.AdminPass)
 	if err != nil {
 		log.Fatalf("ensure admin: %v", err)
 	}
 	if generated != "" {
 		log.Printf("===== first boot: created admin %q with generated password: %s =====", cfg.AdminUser, generated)
 		log.Printf("(set ADMIN_PASSWORD env to avoid auto-generation; change it after login)")
+	}
+	if reset {
+		log.Printf("admin %q password synced to configured ADMIN_PASSWORD", cfg.AdminUser)
 	}
 
 	authSvc := auth.New(jwtSecret, mustDuration(cfg.JWTExpiry))
