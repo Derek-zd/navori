@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -38,6 +39,12 @@ func Open(driver, dsn, path string) (*Store, error) {
 
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
+		if driver == "mysql" && strings.Contains(err.Error(), "default addr for network") {
+			// DSN host written without tcp(...) wrapper, e.g.
+			//   user:pass@host:3306/db   (wrong)
+			//   user:pass@tcp(host:3306)/db  (right)
+			return nil, fmt.Errorf("open mysql: %w (hint: DB_DSN host must be wrapped as tcp(host:port), e.g. user:pass@tcp(dbhost:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local)", err)
+		}
 		return nil, fmt.Errorf("open %s: %w", driver, err)
 	}
 	return &Store{DB: db, Driver: driver}, nil
