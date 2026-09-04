@@ -1,0 +1,22 @@
+{
+  "_comment": "Navori 配置文件示例。字段名 = 环境变量名小写。优先级：环境变量 > 本文件 > 内置默认。留空或不写的字段 = 未设置，回落给 env/默认。使用：cp 为 ./navori.json 或 /etc/navori/navori.json，或用 NAVORI_CONFIG 指定路径。生产建议显式设置 master_key 与 jwt_secret。",
+  "port": "3000",
+
+  "db_driver": "mysql",
+  "db_dsn": "user:pass@tcp(127.0.0.1:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local",
+  "db_path": "data/navori.db",
+
+  "data_dir": "data",
+
+  "master_key": "",
+  "jwt_secret": "",
+  "jwt_expires_in": "168h",
+
+  "admin_user": "admin",
+  "admin_password": "",
+
+  "base_url": "http://localhost:3000",
+
+  "run_retention": 10,
+  "health_check_interval": 5
+}

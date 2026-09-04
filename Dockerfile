@@ -29,6 +29,9 @@ RUN apk add --no-cache git kubectl podman fuse-overlayfs shadow su-exec ca-certi
 RUN adduser -D -u 1000 navori && \
     echo "navori:100000:65536" >> /etc/subuid && \
     echo "navori:100000:65536" >> /etc/subgid
+# Pre-create writable dirs owned by navori as a fallback; entrypoint re-chowns
+# DATA_DIR and XDG_RUNTIME_DIR at boot when started as root (mounts are root-owned).
+RUN mkdir -p /data /run/user/1000 && chown -R navori:navori /data /run/user/1000
 COPY --from=build /navori /usr/local/bin/navori
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -40,7 +43,8 @@ ENV PORT=3000 \
     _CONTAINERS_USERNS_CONFIGURED="" \
     BUILDAH_FORMAT=docker
 EXPOSE 3000
+# NOTE: no USER directive on purpose — entrypoint starts as root, chowns the
+# data/runtime dirs (covers PVC mounts), then drops to navori via su-exec.
 VOLUME ["/data"]
 WORKDIR /data
-USER navori
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

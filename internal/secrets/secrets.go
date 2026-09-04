@@ -16,6 +16,21 @@ type Secrets struct {
 	key [32]byte
 }
 
+// NewFromHex builds Secrets from an explicit hex-encoded 32-byte master key
+// (e.g. from MASTER_KEY env / config file). No file IO is performed.
+func NewFromHex(encoded string) (*Secrets, error) {
+	key, err := hex.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("master key: not valid hex: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("master key: must be 32 bytes (64 hex chars), got %d", len(key))
+	}
+	var s Secrets
+	copy(s.key[:], key)
+	return &s, nil
+}
+
 // LoadOrCreateMasterKey loads data/master.key or generates one (0600).
 func LoadOrCreateMasterKey(dataDir string) (*Secrets, error) {
 	path := filepath.Join(dataDir, "master.key")

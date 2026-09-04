@@ -18,16 +18,28 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("create data dir: %v", err)
 	}
 
-	// master key for AES-256-GCM
-	sec, err := secrets.LoadOrCreateMasterKey(cfg.DataDir)
-	if err != nil {
-		log.Fatalf("master key: %v", err)
+	// master key for AES-256-GCM: explicit MASTER_KEY (env/config) wins;
+	// otherwise auto-generate + persist under DATA_DIR.
+	var sec *secrets.Secrets
+	if cfg.MasterKey != "" {
+		sec, err = secrets.NewFromHex(cfg.MasterKey)
+		if err != nil {
+			log.Fatalf("master key: %v", err)
+		}
+	} else {
+		sec, err = secrets.LoadOrCreateMasterKey(cfg.DataDir)
+		if err != nil {
+			log.Fatalf("master key: %v", err)
+		}
 	}
 
 	// JWT secret (auto-generate + persist if empty)
