@@ -102,7 +102,9 @@ func Load(flagPath string) (*Config, error) {
 
 // parseEnvFile reads a KEY=VALUE file (".env" style). Lines starting with '#'
 // and blank lines are ignored. Keys may optionally be prefixed with "export".
-// Values may be optionally wrapped in single/double quotes.
+// Values may be optionally wrapped in single/double quotes. An inline comment
+// (a " #" outside quotes) is stripped; to keep a literal "#" in a value, wrap
+// the value in quotes.
 func parseEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -126,6 +128,12 @@ func parseEnvFile(path string) (map[string]string, error) {
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
+		// strip inline comment: " #" outside quotes
+		if !strings.HasPrefix(val, "\"") && !strings.HasPrefix(val, "'") {
+			if ci := strings.Index(val, " #"); ci >= 0 {
+				val = strings.TrimSpace(val[:ci])
+			}
+		}
 		if len(val) >= 2 {
 			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
 				val = val[1 : len(val)-1]

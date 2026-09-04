@@ -179,3 +179,28 @@ unquoted=value
 		t.Errorf("BaseURL = %q", c.BaseURL)
 	}
 }
+
+func TestParseEnvFileInlineComments(t *testing.T) {
+	clearEnv(t)
+	p := writeEnvFile(t, `ADMIN_PASSWORD=navori@2026      # 留空首启自动生成（打印到日志）
+JWT_SECRET=abc # inline comment
+PORT=3000 # trailing space comment
+MASTER_KEY=quoted#hash # this comment is stripped
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.AdminPass != "navori@2026" {
+		t.Errorf("AdminPass = %q, want navori@2026 (inline comment must be stripped)", c.AdminPass)
+	}
+	if c.JWTSecret != "abc" {
+		t.Errorf("JWTSecret = %q, want abc", c.JWTSecret)
+	}
+	if c.Port != "3000" {
+		t.Errorf("Port = %q, want 3000 (inline comment after space stripped)", c.Port)
+	}
+	if c.MasterKey != "quoted#hash" {
+		t.Errorf("MasterKey = %q, want quoted#hash (quoted value keeps #)", c.MasterKey)
+	}
+}
