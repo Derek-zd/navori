@@ -60,11 +60,13 @@ RUN mkdir -p /data /run/user/1000 && chown -R navori:navori /data /run/user/1000
 COPY --from=build /navori /usr/local/bin/navori
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-ENV PORT=3000 \
-    DB_DRIVER=sqlite \
-    DB_PATH=/data/navori.db \
-    DATA_DIR=/data \
-    XDG_RUNTIME_DIR=/run/user/1000 \
+# Only runtime-mechanism env vars are baked in here. Business config
+# (PORT/DB_*/DATA_DIR/MASTER_KEY/...) must come from config file or real env,
+# NOT from image ENV — otherwise the image defaults would always override
+# user config (env > config file by design). navori's code defaults apply when
+# neither is set. Data dir defaults to /data via the WORKDIR below when the
+# user doesn't configure it.
+ENV XDG_RUNTIME_DIR=/run/user/1000 \
     _CONTAINERS_USERNS_CONFIGURED="" \
     BUILDAH_FORMAT=docker \
     # chroot isolation: builds RUN steps without mount namespaces, so image
