@@ -50,9 +50,9 @@ func (s *Server) createRepository(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "name and gitUrl are required")
 		return
 	}
-	if req.DefaultBranch == "" {
-		req.DefaultBranch = "main"
-	}
+	// DefaultBranch is left empty on purpose: it is auto-detected from the
+	// remote during scan (and lazily during a run). Hard-coding "main" here
+	// caused runs against repos whose default branch is e.g. "master" to fail.
 	if req.DockerfilePath == "" {
 		req.DockerfilePath = "Dockerfile"
 	}
@@ -63,7 +63,7 @@ func (s *Server) createRepository(w http.ResponseWriter, r *http.Request) {
 		Name:           req.Name,
 		GitURL:         req.GitURL,
 		CredentialID:   req.CredentialID,
-		DefaultBranch:  req.DefaultBranch,
+		DefaultBranch:  req.DefaultBranch, // may be ""
 		DockerfilePath: req.DockerfilePath,
 		BuildContext:   req.BuildContext,
 		ScanStatus:     "pending",

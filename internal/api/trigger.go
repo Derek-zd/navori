@@ -40,6 +40,25 @@ func (s *Server) resolveForBranch(p *store.Pipeline, repo *store.Repository, bra
 
 // trigger creates a run with pull/build/push steps and executes them asynchronously.
 func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType, ref, branch, commit string, config map[string]interface{}) (*store.Run, error) {
+	// Runs that target the repo's default branch (cron, or manual run without
+	// an explicit ref) should track the remote's *actual* default branch.
+	// Repos created before auto-detection may still carry a hard-coded "main"
+	// (or an outdated value) — correct it here so the run doesn't fail with
+	// "pathspec 'main' did not match". Explicit branches (webhook event
+	// branch, ref-specified manual runs) are never overridden.
+	targetsDefault := triggerType == "cron" ||
+		(triggerType == "manual" && ref == "") ||
+		branch == ""
+	if targetsDefault && (branch == "" || branch == repo.DefaultBranch) {
+		if rb, berr := gitx.RemoteDefaultBranch(s.cloneURL(repo)); berr == nil && rb != "" && rb != branch {
+			branch = rb
+			if rb != repo.DefaultBranch {
+				repo.DefaultBranch = rb
+				s.DB.DB.Model(repo).Update("default_branch", rb)
+			}
+		}
+	}
+
 	now := time.Now()
 	cfgJSON, _ := json.Marshal(config)
 	run := store.Run{
@@ -89,9 +108,21 @@ func (s *Server) doScan(repo *store.Repository) {
 	dir := s.repoDir(repo.ID)
 	url := s.cloneURL(repo)
 	var err error
+
+	// Detect the remote's real default branch first (ls-remote, no clone
+	// needed) so we don't try to clone a branch that doesn't exist.
+	realDefault := repo.DefaultBranch
+	if b, berr := gitx.RemoteDefaultBranch(url); berr == nil && b != "" {
+		realDefault = b
+		if b != repo.DefaultBranch {
+			repo.DefaultBranch = b
+			s.DB.DB.Model(repo).Update("default_branch", b)
+		}
+	}
+
 	if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr != nil {
-		err = gitx.Clone(dir, url, repo.DefaultBranch)
-		if err != nil && repo.DefaultBranch != "" {
+		err = gitx.Clone(dir, url, realDefault)
+		if err != nil {
 			_ = os.RemoveAll(dir)
 			err = gitx.Clone(dir, url, "")
 		}

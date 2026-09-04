@@ -171,12 +171,15 @@ func (s *Server) stepPull(ctx context.Context, w io.Writer, repo *store.Reposito
 	dir := s.repoDir(repo.ID)
 	url := s.cloneURL(repo)
 	fmt.Fprintf(w, "branch=%s\n", branch)
+
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		if err := gitx.CloneW(dir, url, "", w); err != nil {
+		if err := gitx.CloneW(dir, url, branch, w); err != nil {
 			return err
 		}
-		if err := gitx.CheckoutW(dir, branch, w); err != nil {
-			return err
+		if branch != "" {
+			if err := gitx.CheckoutW(dir, branch, w); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := gitx.CheckoutW(dir, branch, w); err != nil {

@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -25,6 +26,32 @@ func TestFindDockerfile(t *testing.T) {
 	write(t, filepath.Join(root3, "a", "b", "c", "d", "Dockerfile"), "FROM alpine")
 	if _, err = FindDockerfile(root3); err == nil {
 		t.Fatalf("too deep should error")
+	}
+}
+
+func TestRemoteDefaultBranch(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-b", "master", ".")
+	write(t, filepath.Join(repo, "README.md"), "hi")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init")
+
+	url := "file://" + repo
+	got, err := RemoteDefaultBranch(url)
+	if err != nil {
+		t.Fatalf("RemoteDefaultBranch: %v", err)
+	}
+	if got != "master" {
+		t.Errorf("default branch = %q, want master", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

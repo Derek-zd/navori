@@ -111,6 +111,27 @@ func DefaultBranch(dir string) (string, error) {
 	return strings.TrimPrefix(strings.TrimSpace(out), "origin/"), nil
 }
 
+// RemoteDefaultBranch returns the remote's default branch name (the branch its
+// HEAD points at) using ls-remote --symref, without needing a local clone.
+func RemoteDefaultBranch(url string) (string, error) {
+	cmd := exec.Command("git", "ls-remote", "--symref", url, "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote --symref: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ref:") {
+			// e.g. "ref: refs/heads/main\tHEAD"
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				return strings.TrimPrefix(fields[1], "refs/heads/"), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("git ls-remote --symref: no HEAD symref")
+}
+
 // FindDockerfile returns the relative path of a Dockerfile within 3 directory levels.
 func FindDockerfile(root string) (string, error) {
 	var found string
