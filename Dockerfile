@@ -1,9 +1,8 @@
 # ---- frontend build ----
 # Override for slow networks, e.g.:
 #   docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com .
-ARG NPM_REGISTRY=https://registry.npmjs.org
 FROM node:20-alpine AS fe
-ARG NPM_REGISTRY
+ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --registry=$NPM_REGISTRY --no-audit --no-fund
@@ -13,9 +12,8 @@ RUN npm run build
 # ---- go build ----
 # Override for slow networks, e.g.:
 #   docker build --build-arg GOPROXY=https://goproxy.cn,direct .
-ARG GOPROXY=https://proxy.golang.org,direct
 FROM golang:1.24-alpine AS build
-ARG GOPROXY
+ARG GOPROXY=https://proxy.golang.org,direct
 WORKDIR /src
 ENV GOPROXY=$GOPROXY CGO_ENABLED=0
 COPY go.mod go.sum ./
@@ -25,16 +23,20 @@ COPY --from=fe /src/dist ./web/dist
 RUN go build -trimpath -o /navori ./cmd/server
 
 # ---- runtime ----
-# Override apk mirror for slow networks, e.g.:
-#   docker build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine .
-ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
-FROM alpine:3.20
-ARG ALPINE_MIRROR
 # Self-contained builder: podman rootless + fuse-overlayfs can build images
 # fully in userspace — no host docker socket, no privileged container
 # (DESIGN §4.1). podman is symlinked to docker so the engine's `docker`
 # shell-outs just work. shadow provides useradd for the non-root runner user.
-RUN printf '%s/v3.20/main\n%s/v3.20/community\n' "$ALPINE_MIRROR" "$ALPINE_MIRROR" > /etc/apk/repositories \
+#
+# ALPINE_MIRROR: only rewrite /etc/apk/repositories when explicitly set, e.g.
+#   docker build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine .
+# The official alpine image already ships main + community pointing at
+# dl-cdn.alpinelinux.org, so the default needs no rewrite.
+FROM alpine:3.20
+ARG ALPINE_MIRROR=
+RUN if [ -n "$ALPINE_MIRROR" ]; then \
+      printf '%s/v3.20/main\n%s/v3.20/community\n' "$ALPINE_MIRROR" "$ALPINE_MIRROR" > /etc/apk/repositories; \
+    fi \
     && apk add --no-cache git kubectl podman fuse-overlayfs shadow su-exec ca-certificates tzdata \
     && ln -s /usr/bin/podman /usr/local/bin/docker \
     && mkdir -p /etc/containers \
