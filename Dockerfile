@@ -23,10 +23,14 @@ COPY --from=fe /src/dist ./web/dist
 RUN go build -trimpath -o /navori ./cmd/server
 
 # ---- runtime ----
-# Self-contained builder: podman rootless + fuse-overlayfs can build images
-# fully in userspace — no host docker socket, no privileged container
-# (DESIGN §4.1). podman is symlinked to docker so the engine's `docker`
-# shell-outs just work. shadow provides useradd for the non-root runner user.
+# Self-contained builder: podman rootless builds/pushes business images inside
+# the pod — no host docker socket, no privileged container (DESIGN §4.1).
+# podman is symlinked to docker so the engine's `docker` shell-outs work.
+#
+# Storage driver: vfs. Rootless overlay/fuse-overlayfs needs unprivileged
+# mounts which managed K8s nodes usually deny ("configure storage: mount ...
+# permission denied"). vfs performs no mounts at all — slow but works on any
+# cluster. graphRoot lives under /data (writable, PVC-able).
 #
 # ALPINE_MIRROR: only rewrite /etc/apk/repositories when explicitly set, e.g.
 #   docker build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine .
@@ -40,11 +44,16 @@ RUN if [ -n "$ALPINE_MIRROR" ]; then \
     && apk add --no-cache git kubectl podman fuse-overlayfs shadow su-exec ca-certificates tzdata \
     && ln -s /usr/bin/podman /usr/local/bin/docker \
     && mkdir -p /etc/containers \
-    && printf '[storage]\ndriver = "overlay"\ngraphRoot = "/var/lib/containers/storage"\nrunRoot = "/run/containers/storage"\n' > /etc/containers/storage.conf
+    && printf '[storage]\ndriver = "vfs"\ngraphRoot = "/data/containers/storage"\nrunRoot = "/run/user/1000/containers"\n' > /etc/containers/storage.conf
 # Run as a non-root user so podman rootless works (needs subuid/subgid range).
 RUN adduser -D -u 1000 navori && \
     echo "navori:100000:65536" >> /etc/subuid && \
     echo "navori:100000:65536" >> /etc/subgid
+# Rootless podman reads the per-user storage.conf (overrides /etc); point it
+# at the same vfs setup so both code paths agree.
+RUN mkdir -p /home/navori/.config/containers \
+    && printf '[storage]\ndriver = "vfs"\ngraphRoot = "/data/containers/storage"\nrunRoot = "/run/user/1000/containers"\n' > /home/navori/.config/containers/storage.conf \
+    && chown -R navori:navori /home/navori/.config
 # Pre-create writable dirs owned by navori as a fallback; entrypoint re-chowns
 # DATA_DIR and XDG_RUNTIME_DIR at boot when started as root (mounts are root-owned).
 RUN mkdir -p /data /run/user/1000 && chown -R navori:navori /data /run/user/1000
@@ -57,7 +66,12 @@ ENV PORT=3000 \
     DATA_DIR=/data \
     XDG_RUNTIME_DIR=/run/user/1000 \
     _CONTAINERS_USERNS_CONFIGURED="" \
-    BUILDAH_FORMAT=docker
+    BUILDAH_FORMAT=docker \
+    # chroot isolation: builds RUN steps without mount namespaces, so image
+    # builds work on managed K8s / unprivileged runtimes that deny
+    # unprivileged proc/overlay mounts ("mount proc: Operation not permitted").
+    BUILDAH_ISOLATION=chroot \
+    PODMAN_IGNORE_CGROUPSV1_WARNING=1
 EXPOSE 3000
 # NOTE: no USER directive on purpose — entrypoint starts as root, chowns the
 # data/runtime dirs (covers PVC mounts), then drops to navori via su-exec.
