@@ -1,0 +1,12 @@
+.git
+.gitignore
+*.md
+data
+web/node_modules
+web/dist
+# don't copy host build artifacts / caches
+**/node_modules
+**/.next
+**/*.log
+.env
+.env.*

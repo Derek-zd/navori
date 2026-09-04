@@ -1,0 +1,18 @@
+# build artifacts
+/navori
+*.exe
+
+# frontend
+/web/node_modules
+/web/dist
+
+# local data (master.key / jwt.secret / sqlite db / repos / logs) — NEVER commit
+/data
+*.db
+*.key
+*.secret
+*.log
+
+# env
+.env
+.env.local

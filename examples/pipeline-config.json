@@ -1,0 +1,31 @@
+{
+  "repoId": 1,
+  "config": {
+    "dockerfilePath": "Dockerfile",
+    "buildContext": ".",
+    "buildArgs": { "NODE_ENV": "production" },
+    "platform": "linux/amd64",
+    "imageName": "my-app",
+    "registryId": 1,
+    "tagTemplate": "{branch}-{commit_short}-{timestamp}",
+    "deploy": {
+      "targetId": 1,
+      "kind": "Deployment",
+      "name": "my-app",
+      "namespace": "prod",
+      "container": "my-app",
+      "approval": true,
+      "approvers": ["alice", "bob"]
+    }
+  },
+  "branchRules": [
+    { "branch": "release/*", "overrides": { "imageName": "my-app-release", "deploy": { "namespace": "release", "approval": true } } },
+    { "branch": "feature/*", "overrides": { "deploy": { "namespace": "dev" } } },
+    { "branch": "**" }
+  ],
+  "notify": {
+    "webhookUrl": "https://example.com/hook",
+    "secret": "your-hmac-secret",
+    "on": ["success", "failure", "rejected"]
+  }
+}
