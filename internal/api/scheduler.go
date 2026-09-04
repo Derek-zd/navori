@@ -55,11 +55,13 @@ func (s *Server) triggerScheduled(p *store.Pipeline) {
 		log.Printf("scheduled skip pipeline %d: no new commit %s", p.ID, head)
 		return // no new commit on default branch
 	}
-	config, ok := s.resolveForBranch(p, &repo, repo.DefaultBranch)
+	// cron targets the remote's actual default branch (self-heals stale value)
+	branch := s.resolveDefaultBranch(&repo)
+	config, ok := s.resolveForBranch(p, &repo, branch)
 	if !ok {
 		return
 	}
-	if _, err := s.trigger(p, &repo, "cron", "", repo.DefaultBranch, head, config); err != nil {
+	if _, err := s.trigger(p, &repo, "cron", "", branch, head, config); err != nil {
 		log.Printf("scheduled run pipeline %d failed: %v", p.ID, err)
 	}
 }

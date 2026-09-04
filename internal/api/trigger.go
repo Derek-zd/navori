@@ -38,25 +38,33 @@ func (s *Server) resolveForBranch(p *store.Pipeline, repo *store.Repository, bra
 	return cfg, ok
 }
 
+// resolveDefaultBranch returns the remote's actual default branch, self-healing
+// a stale stored value (repos created before auto-detection may carry a
+// hard-coded "main" even though the remote default is e.g. "master"). Callers
+// that target the default branch (manual run without ref, cron) use this BEFORE
+// matching branch rules, so rules and the branch actually pulled stay in sync.
+func (s *Server) resolveDefaultBranch(repo *store.Repository) string {
+	if b, err := gitx.RemoteDefaultBranch(s.cloneURL(repo)); err == nil && b != "" {
+		if b != repo.DefaultBranch {
+			repo.DefaultBranch = b
+			s.DB.DB.Model(repo).Update("default_branch", b)
+		}
+		return b
+	}
+	if repo.DefaultBranch == "" {
+		return "main" // fallback when remote can't be queried and nothing stored
+	}
+	return repo.DefaultBranch
+}
+
 // trigger creates a run with pull/build/push steps and executes them asynchronously.
 func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType, ref, branch, commit string, config map[string]interface{}) (*store.Run, error) {
-	// Runs that target the repo's default branch (cron, or manual run without
-	// an explicit ref) should track the remote's *actual* default branch.
-	// Repos created before auto-detection may still carry a hard-coded "main"
-	// (or an outdated value) — correct it here so the run doesn't fail with
-	// "pathspec 'main' did not match". Explicit branches (webhook event
-	// branch, ref-specified manual runs) are never overridden.
-	targetsDefault := triggerType == "cron" ||
-		(triggerType == "manual" && ref == "") ||
-		branch == ""
-	if targetsDefault && (branch == "" || branch == repo.DefaultBranch) {
-		if rb, berr := gitx.RemoteDefaultBranch(s.cloneURL(repo)); berr == nil && rb != "" && rb != branch {
-			branch = rb
-			if rb != repo.DefaultBranch {
-				repo.DefaultBranch = rb
-				s.DB.DB.Model(repo).Update("default_branch", rb)
-			}
-		}
+	// Safety net: an empty branch (shouldn't normally happen since callers
+	// resolve the default branch first) falls back to the remote default.
+	// Explicit branches (webhook event branch, ref-specified manual runs) are
+	// never overridden here.
+	if branch == "" {
+		branch = s.resolveDefaultBranch(repo)
 	}
 
 	now := time.Now()

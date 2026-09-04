@@ -185,6 +185,11 @@ func (s *Server) runPipeline(w http.ResponseWriter, r *http.Request) {
 	if req.Ref != "" {
 		ref = req.Ref
 		branch = stripRef(req.Ref)
+	} else {
+		// No explicit ref: run the remote's actual default branch, so branch
+		// rules and the branch actually pulled stay consistent even if the
+		// stored default branch is stale (e.g. hard-coded "main").
+		branch = s.resolveDefaultBranch(&repo)
 	}
 	config, ok := s.resolveForBranch(&p, &repo, branch)
 	if !ok {
