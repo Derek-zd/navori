@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +19,13 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	configFlag := flag.String("config", "",
+		"path to config file (.env style, KEY=VALUE). "+
+			"If empty, probes ./navori.env then /etc/navori/navori.env. "+
+			"Environment variables override file values.")
+	flag.Parse()
+
+	cfg, err := config.Load(*configFlag)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}

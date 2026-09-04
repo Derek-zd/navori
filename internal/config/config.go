@@ -1,14 +1,16 @@
 package config
 
 import (
-	"encoding/json"
+	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Config holds runtime configuration, loaded from (in precedence order):
-// environment variables > config file > defaults.
+// environment variables > -config file (.env style) > defaults.
 type Config struct {
 	Port                string
 	DBDriver            string // sqlite | mysql
@@ -26,107 +28,113 @@ type Config struct {
 	HealthCheckInterval int // minutes between registry/deploy health checks
 }
 
-// fileConfig mirrors Config for the optional JSON config file.
-// JSON field names use snake_case to match env var names (lowercased).
-type fileConfig struct {
-	Port                string `json:"port"`
-	DBDriver            string `json:"db_driver"`
-	DBPath              string `json:"db_path"`
-	DBDSN               string `json:"db_dsn"`
-	DataDir             string `json:"data_dir"`
-	MasterKey           string `json:"master_key"`
-	JWTSecret           string `json:"jwt_secret"`
-	JWTExpiry           string `json:"jwt_expires_in"`
-	AdminUser           string `json:"admin_user"`
-	AdminPass           string `json:"admin_password"`
-	BaseURL             string `json:"base_url"`
-	RunRetention        *int   `json:"run_retention"`
-	HealthCheckInterval *int   `json:"health_check_interval"`
-}
+// defaultFileCandidates are probed (in order) when no -config flag is given.
+// The first existing file wins; if none exists, env-only mode is used.
+var defaultFileCandidates = []string{"navori.env", "/etc/navori/navori.env"}
 
-// configFilePath resolves the config file path:
-// NAVORI_CONFIG env > ./navori.json > /etc/navori/navori.json
-// Returns "" if none configured (env-only mode).
-func configFilePath() string {
-	if p := os.Getenv("NAVORI_CONFIG"); p != "" {
-		return p
-	}
-	for _, cand := range []string{"navori.json", "/etc/navori/navori.json"} {
-		if _, err := os.Stat(cand); err == nil {
-			return cand
+// Load builds Config. flagPath is the -config flag value ("" if not given).
+//
+// Source precedence (high -> low):
+//  1. environment variables (non-empty wins)
+//  2. config file: flagPath if given, else first existing defaultFileCandidates
+//  3. built-in defaults
+//
+// Config file format is plain KEY=VALUE lines (# comments and blank lines
+// ignored), i.e. the same keys as the environment.
+func Load(flagPath string) (*Config, error) {
+	path := flagPath
+	if path == "" {
+		for _, c := range defaultFileCandidates {
+			if _, err := os.Stat(c); err == nil {
+				path = c
+				break
+			}
 		}
 	}
-	return ""
-}
 
-// loadFile reads the config file if present. Missing file (when not
-// explicitly requested) is fine; parse errors are surfaced.
-func loadFile() (fileConfig, error) {
-	var fc fileConfig
-	path := configFilePath()
-	if path == "" {
-		return fc, nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return fc, err
-	}
-	if err := json.Unmarshal(b, &fc); err != nil {
-		return fc, err
-	}
-	return fc, nil
-}
-
-// Load builds Config: defaults <- file <- env (env wins when non-empty).
-func Load() (*Config, error) {
-	fc, err := loadFile()
-	if err != nil {
-		return nil, err
+	fileVals := map[string]string{}
+	if path != "" {
+		fv, err := parseEnvFile(path)
+		if err != nil {
+			return nil, err
+		}
+		fileVals = fv
 	}
 
-	// resolve with helpers; each returns first non-empty of env, file, def.
-	str := func(envKey, fileVal, def string) string {
+	// get returns env value if non-empty, else file value if non-empty, else def.
+	get := func(envKey, def string) string {
 		if v := os.Getenv(envKey); v != "" {
 			return v
 		}
-		if fileVal != "" {
-			return fileVal
+		if v := fileVals[envKey]; v != "" {
+			return v
 		}
 		return def
 	}
-	intv := func(envKey string, fileVal *int, def int) int {
-		if v := os.Getenv(envKey); v != "" {
+	getInt := func(envKey string, def int) int {
+		if v := get(envKey, ""); v != "" {
 			if n, err := strconv.Atoi(v); err == nil {
 				return n
 			}
 		}
-		if fileVal != nil {
-			return *fileVal
-		}
 		return def
 	}
 
+	dataDir := get("DATA_DIR", "data")
 	c := &Config{
-		Port:                str("PORT", fc.Port, "3000"),
-		DBDriver:            str("DB_DRIVER", fc.DBDriver, "sqlite"),
-		DBPath:              str("DB_PATH", fc.DBPath, ""), // resolved below after DataDir
-		DBDSN:               str("DB_DSN", fc.DBDSN, ""),
-		DataDir:             str("DATA_DIR", fc.DataDir, "data"),
-		MasterKey:           str("MASTER_KEY", fc.MasterKey, ""),
-		JWTSecret:           str("JWT_SECRET", fc.JWTSecret, ""),
-		JWTExpiry:           str("JWT_EXPIRES_IN", fc.JWTExpiry, "168h"),
-		AdminUser:           str("ADMIN_USER", fc.AdminUser, "admin"),
-		AdminPass:           str("ADMIN_PASSWORD", fc.AdminPass, ""),
-		BaseURL:             str("BASE_URL", fc.BaseURL, "http://localhost:3000"),
+		Port:                get("PORT", "3000"),
+		DBDriver:            get("DB_DRIVER", "sqlite"),
+		DBPath:              get("DB_PATH", filepath.Join(dataDir, "navori.db")),
+		DBDSN:               get("DB_DSN", ""),
+		DataDir:             dataDir,
+		MasterKey:           get("MASTER_KEY", ""),
+		JWTSecret:           get("JWT_SECRET", ""),
+		JWTExpiry:           get("JWT_EXPIRES_IN", "168h"),
+		AdminUser:           get("ADMIN_USER", "admin"),
+		AdminPass:           get("ADMIN_PASSWORD", ""),
+		BaseURL:             get("BASE_URL", "http://localhost:3000"),
 		Version:             "0.1.0",
-		RunRetention:        intv("RUN_RETENTION", fc.RunRetention, 10),
-		HealthCheckInterval: intv("HEALTH_CHECK_INTERVAL", fc.HealthCheckInterval, 5),
+		RunRetention:        getInt("RUN_RETENTION", 10),
+		HealthCheckInterval: getInt("HEALTH_CHECK_INTERVAL", 5),
 	}
-
-	// DB_PATH default: <DATA_DIR>/navori.db (sqlite)
-	if c.DBPath == "" {
-		c.DBPath = filepath.Join(c.DataDir, "navori.db")
-	}
-
 	return c, nil
+}
+
+// parseEnvFile reads a KEY=VALUE file (".env" style). Lines starting with '#'
+// and blank lines are ignored. Keys may optionally be prefixed with "export".
+// Values may be optionally wrapped in single/double quotes.
+func parseEnvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open config file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	out := map[string]string{}
+	sc := bufio.NewScanner(f)
+	ln := 0
+	for sc.Scan() {
+		ln++
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			return nil, fmt.Errorf("parse config file %s: line %d: expected KEY=VALUE", path, ln)
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+		out[key] = val
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	return out, nil
 }

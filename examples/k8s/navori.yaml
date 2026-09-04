@@ -1,0 +1,138 @@
+# Navori Kubernetes 部署模板（MySQL 模式）
+# 使用方法：
+#   1. 替换下方所有 <...> 占位值（镜像地址、密钥、MySQL DSN、域名等）
+#   2. kubectl create namespace navori
+#   3. kubectl apply -f navori.yaml
+#
+# 生成密钥：
+#   openssl rand -hex 32   # -> MASTER_KEY
+#   openssl rand -hex 32   # -> JWT_SECRET
+#
+# MySQL 建库（utf8mb4）：CREATE DATABASE navori ...; CREATE USER ...; GRANT ...
+# DSN 格式：navori:<pwd>@tcp(<host>:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local
+#
+# ── 数据分层 ─────────────────────────────────────────────
+#   业务状态（仓库/流水线/run/凭据密文）  -> MySQL
+#   密钥（MASTER_KEY/JWT_SECRET）        -> 下方 Secret 注入（重启不失效）
+#   仓库克隆缓存 + run 日志              -> /data；PVC 可选（见文件尾注释）
+#
+# ── 是否挂 PVC ───────────────────────────────────────────
+#   不挂（默认）：缓存/日志在容器可写层，Pod 删除即清空，重启自动重新 clone。
+#   想保留历史日志：取消下方 PVC 与 volume 相关注释即可（StorageClass 按需改）。
+#
+# ── 集群强制非 root（PSA restricted）时 ──────────────────
+#   镜像默认以 root 启动 entrypoint（chown /data 后 su-exec 降权到 uid 1000），
+#   该流程被 runAsNonRoot 禁止时，改 Deployment spec 为：
+#     securityContext:
+#       runAsNonRoot: true
+#       runAsUser: 1000
+#       fsGroup: 1000
+#     initContainers:
+#       - name: fix-data-dir
+#         image: busybox:1.36
+#         command: ["sh", "-c", "chown -R 1000:1000 /data 2>/dev/null || true"]
+#         securityContext: { runAsUser: 0 }
+#         volumeMounts: [{ name: data, mountPath: /data }]   # 仅挂 PVC 时需要
+#   并给主容器加 emptyDir 挂 /run（podman XDG_RUNTIME_DIR 需要可写目录）。
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: navori-env
+  namespace: navori
+type: Opaque
+stringData:
+  DB_DRIVER: "mysql"
+  DB_DSN: "navori:<mysql-password>@tcp(<mysql-host>:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local"
+  MASTER_KEY: "<master-key>"
+  JWT_SECRET: "<jwt-secret>"
+  JWT_EXPIRES_IN: "168h"
+  ADMIN_USER: "admin"
+  ADMIN_PASSWORD: "<admin-password>"      # 留空则首启打印到 Pod 日志
+  BASE_URL: "https://<your-domain>"
+  RUN_RETENTION: "10"
+  HEALTH_CHECK_INTERVAL: "5"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: navori
+  namespace: navori
+  labels: { app: navori }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: navori }
+  template:
+    metadata:
+      labels: { app: navori }
+    spec:
+      # 默认以 root 启动一次（entrypoint chown /data 后 su-exec 降到 uid 1000），
+      # 无需 runAsNonRoot。若集群强制非 root(PSA restricted)，见本文件头部注释。
+      containers:
+        - name: navori
+          image: <your-registry>/navori:latest
+          ports: [{ containerPort: 3000 }]
+          envFrom:
+            - secretRef: { name: navori-env }
+          readinessProbe:
+            httpGet: { path: /api/system/health, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/system/health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "2",    memory: "2Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: navori
+  namespace: navori
+spec:
+  selector: { app: navori }
+  ports: [{ port: 3000, targetPort: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: navori
+  namespace: navori
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: <your-domain>
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: navori
+                port: { number: 3000 }
+---
+# ── 可选：保留仓库克隆缓存 + run 日志 ──────────────────
+# 取消下面的注释并 apply，同时在 Deployment 的 spec 下加：
+#   volumes:
+#     - name: data
+#       persistentVolumeClaim: { claimName: navori-data }
+# 在 containers[0] 下加：
+#   volumeMounts:
+#     - { name: data, mountPath: /data }
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: navori-data
+#   namespace: navori
+# spec:
+#   accessModes: [ReadWriteOnce]
+#   resources:
+#     requests:
+#       storage: 10Gi
+#   # storageClassName: <your-storage-class>

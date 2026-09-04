@@ -6,17 +6,6 @@ import (
 	"testing"
 )
 
-// writeFile writes a temp config file and returns its path.
-func writeCfg(t *testing.T, content string) string {
-	t.Helper()
-	dir := t.TempDir()
-	p := filepath.Join(dir, "navori.json")
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
 // clearEnv removes all keys Load() may read, so tests are hermetic.
 func clearEnv(t *testing.T) {
 	t.Helper()
@@ -24,15 +13,24 @@ func clearEnv(t *testing.T) {
 		"PORT", "DB_DRIVER", "DB_PATH", "DB_DSN", "DATA_DIR",
 		"MASTER_KEY", "JWT_SECRET", "JWT_EXPIRES_IN",
 		"ADMIN_USER", "ADMIN_PASSWORD", "BASE_URL",
-		"RUN_RETENTION", "HEALTH_CHECK_INTERVAL", "NAVORI_CONFIG",
+		"RUN_RETENTION", "HEALTH_CHECK_INTERVAL",
 	} {
 		t.Setenv(k, "")
 	}
 }
 
-func TestLoadDefaults(t *testing.T) {
+func writeEnvFile(t *testing.T, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "navori.env")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestLoadDefaultsEnvOnly(t *testing.T) {
 	clearEnv(t)
-	c, err := Load()
+	c, err := Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -54,21 +52,21 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadFromFile(t *testing.T) {
+func TestLoadFromConfigFile(t *testing.T) {
 	clearEnv(t)
-	p := writeCfg(t, `{
-  "port": "8080",
-  "db_driver": "mysql",
-  "db_dsn": "user:pass@tcp(db:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local",
-  "data_dir": "/opt/navori",
-  "master_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "jwt_secret": "file-jwt",
-  "run_retention": 25,
-  "health_check_interval": 7
-}`)
-	t.Setenv("NAVORI_CONFIG", p)
+	p := writeEnvFile(t, `# navori config
+PORT=8080
+DB_DRIVER=mysql
+DB_DSN=user:pass@tcp(db:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local
+DATA_DIR=/opt/navori
+MASTER_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+JWT_SECRET=file-jwt
+RUN_RETENTION=25
+HEALTH_CHECK_INTERVAL=7
+export ADMIN_USER=fileadmin
+`)
 
-	c, err := Load()
+	c, err := Load(p)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -76,9 +74,8 @@ func TestLoadFromFile(t *testing.T) {
 		t.Errorf("Port = %q, want 8080", c.Port)
 	}
 	if c.DBDriver != "mysql" || c.DBDSN == "" {
-		t.Errorf("DB config from file wrong: driver=%q dsn=%q", c.DBDriver, c.DBDSN)
+		t.Errorf("DB config wrong: driver=%q dsn=%q", c.DBDriver, c.DBDSN)
 	}
-	// DB_PATH empty in file -> default under data_dir
 	want := filepath.Join("/opt/navori", "navori.db")
 	if c.DBPath != want {
 		t.Errorf("DBPath = %q, want %q", c.DBPath, want)
@@ -92,20 +89,22 @@ func TestLoadFromFile(t *testing.T) {
 	if c.RunRetention != 25 || c.HealthCheckInterval != 7 {
 		t.Errorf("file ints wrong: %d %d", c.RunRetention, c.HealthCheckInterval)
 	}
+	if c.AdminUser != "fileadmin" {
+		t.Errorf("AdminUser = %q, want fileadmin (export prefix)", c.AdminUser)
+	}
 }
 
 func TestEnvOverridesFile(t *testing.T) {
 	clearEnv(t)
-	p := writeCfg(t, `{"port": "8080", "db_driver": "sqlite", "admin_user": "fileuser"}`)
-	t.Setenv("NAVORI_CONFIG", p)
+	p := writeEnvFile(t, "PORT=8080\nDB_DRIVER=sqlite\nADMIN_USER=fileuser\n")
 
-	t.Setenv("PORT", "9090")         // env wins over file
-	t.Setenv("DB_DRIVER", "mysql")   // env wins
-	t.Setenv("DB_DSN", "env-dsn")    // env-only (not in file)
-	t.Setenv("ADMIN_USER", "")       // empty env: keep file value
-	t.Setenv("DATA_DIR", "/envdata") // env-only default applies
+	t.Setenv("PORT", "9090") // env wins over file
+	t.Setenv("DB_DRIVER", "mysql")
+	t.Setenv("DB_DSN", "env-dsn") // env-only (not in file)
+	t.Setenv("ADMIN_USER", "")    // empty env: keep file value
+	t.Setenv("DATA_DIR", "/envdata")
 
-	c, err := Load()
+	c, err := Load(p)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -127,13 +126,56 @@ func TestEnvOverridesFile(t *testing.T) {
 	}
 }
 
-func TestMissingConfigFileIsFine(t *testing.T) {
+func TestExplicitMissingConfigFileErrors(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("NAVORI_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.json"))
-	c, err := Load()
+	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.env"))
 	if err == nil {
-		// explicit NAVORI_CONFIG pointing to a missing file should error
-		// so misconfiguration is caught early.
-		t.Fatalf("expected error for missing NAVORI_CONFIG file, got config %+v", c)
+		t.Fatal("expected error when explicit -config file is missing")
+	}
+}
+
+func TestAutoProbeConfigFile(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "navori.env")
+	if err := os.WriteFile(p, []byte("PORT=7777\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	c, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Port != "7777" {
+		t.Errorf("Port = %q, want 7777 from ./navori.env probe", c.Port)
+	}
+}
+
+func TestParseEnvFileQuotesAndComments(t *testing.T) {
+	clearEnv(t)
+	p := writeEnvFile(t, `
+# leading comment
+ADMIN_PASSWORD="p@ss with spaces"
+BASE_URL='https://navori.example.com'
+
+unquoted=value
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.AdminPass != "p@ss with spaces" {
+		t.Errorf("AdminPass = %q", c.AdminPass)
+	}
+	if c.BaseURL != "https://navori.example.com" {
+		t.Errorf("BaseURL = %q", c.BaseURL)
 	}
 }
