@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Square } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Pipeline, Repository, Run } from '../lib/types'
-import { Button, Card, EmptyState, PageHeader, Status, Toast, useToast } from '../components/ui'
+import { Card, EmptyState, PageHeader, Status, Toast, useToast } from '../components/ui'
 
 export default function PipelinesDetail() {
   const { id } = useParams()
@@ -91,10 +91,13 @@ export default function PipelinesDetail() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
                       {isActive(r) ? (
-                        <Button variant="danger" size="sm" onClick={() => cancelRun(r.id)}>
-                          <Square size={13} />
+                        <button
+                          onClick={() => cancelRun(r.id)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                        >
+                          <Square size={12} />
                           取消
-                        </Button>
+                        </button>
                       ) : null}
                       <Link to={'/runs/' + r.id} className="text-sm text-indigo-600 hover:underline">查看详情</Link>
                     </div>

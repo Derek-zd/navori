@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Activity, CheckCircle2, Layers, Search, Square, XCircle } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Run } from '../lib/types'
-import { Button, Card, EmptyState, Input, PageHeader, Select, StatCard, Status, Toast, useToast } from '../components/ui'
+import { Card, EmptyState, Input, PageHeader, Select, StatCard, Status, Toast, useToast } from '../components/ui'
 
 const triggerOptions = [
   { value: '', label: '全部触发' },
@@ -122,10 +122,13 @@ export default function Dashboard() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
                       {isActive(r) ? (
-                        <Button variant="danger" size="sm" onClick={() => cancelRun(r.id)}>
-                          <Square size={13} />
+                        <button
+                          onClick={() => cancelRun(r.id)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                        >
+                          <Square size={12} />
                           取消
-                        </Button>
+                        </button>
                       ) : null}
                       <Link to={'/runs/' + r.id} className="text-sm text-indigo-600 hover:underline">查看详情</Link>
                     </div>
