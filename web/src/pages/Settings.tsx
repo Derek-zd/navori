@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Mail, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Database, Mail, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { User } from '../lib/types'
+import { useAuth } from '../lib/auth'
 import { Button, Card, EmptyState, Input, Modal, PageHeader, Select, Toast, useToast } from '../components/ui'
 
 interface SettingsAPI {
@@ -13,6 +14,22 @@ interface AuditLog {
   action: string
   target: string
   createdAt: string
+}
+interface DiskUsage {
+  path: string
+  exists: boolean
+  percent: number
+  usedGi: number
+  totalGi: number
+}
+interface StorageAPI {
+  usage: DiskUsage[]
+  cleanup: {
+    frequency: string
+    threshold: number
+    lastAt?: string | null
+    lastMode?: string
+  }
 }
 
 export default function Settings() {
@@ -28,7 +45,50 @@ export default function Settings() {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [actionFilter, setActionFilter] = useState('')
   const [showAll, setShowAll] = useState(false)
+  const [storage, setStorage] = useState<StorageAPI | null>(null)
+  const [cleaning, setCleaning] = useState<'prune' | 'deep' | null>(null)
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const { toast, setToast } = useToast()
+
+  async function loadStorage() {
+    if (!isAdmin) return
+    try {
+      setStorage(await api<StorageAPI>('/api/system/storage'))
+    } catch {
+      setStorage(null)
+    }
+  }
+
+  async function saveStoragePolicy() {
+    if (!storage) return
+    try {
+      setStorage(await api<StorageAPI>('/api/system/storage', {
+        method: 'PATCH',
+        body: JSON.stringify({ frequency: storage.cleanup.frequency, threshold: storage.cleanup.threshold }),
+      }))
+      setToast({ type: 'success', text: '清理策略已保存' })
+    } catch (e) {
+      setToast({ type: 'error', text: e instanceof Error ? e.message : '保存失败' })
+    }
+  }
+
+  async function runClean(mode: 'prune' | 'deep') {
+    if (mode === 'deep' && !confirm('深度清理会删除所有未使用的镜像与构建缓存，确认继续？')) return
+    setCleaning(mode)
+    try {
+      const res = await api<{ usage: DiskUsage[]; output: string }>('/api/system/storage/cleanup', {
+        method: 'POST',
+        body: JSON.stringify({ mode }),
+      })
+      if (storage) setStorage({ ...storage, usage: res.usage, cleanup: { ...storage.cleanup, lastAt: new Date().toISOString(), lastMode: mode } })
+      setToast({ type: 'success', text: mode === 'prune' ? '构建缓存已清理' : '深度清理完成' })
+    } catch (e) {
+      setToast({ type: 'error', text: e instanceof Error ? e.message : '清理失败' })
+    } finally {
+      setCleaning(null)
+    }
+  }
 
   async function load() {
     const [us, settings, logs] = await Promise.all([
@@ -48,7 +108,14 @@ export default function Settings() {
   }
   useEffect(() => {
     load().catch(() => {})
+    loadStorage()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (isAdmin) loadStorage()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
 
   function resetForm() {
     setUName(''); setUPass(''); setURole('user')
@@ -106,7 +173,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="设置" description="用户管理 / 发件邮箱" />
+      <PageHeader title="设置" description="用户管理 / 发件邮箱 / 存储清理" />
 
       <Card>
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -174,6 +241,70 @@ export default function Settings() {
           <Button onClick={saveSmtp} disabled={smtpSaved}>{smtpSaved ? '保存中…' : '保存发件邮箱'}</Button>
         </div>
       </Card>
+
+      {isAdmin ? (
+        <Card>
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><Database size={15} />存储管理（镜像构建缓存）</h2>
+          </div>
+          <div className="space-y-4 p-5">
+            {storage ? (
+              <>
+                {storage.usage.filter((u) => u.exists).map((u) => (
+                  <div key={u.path}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-mono text-slate-500">{u.path}</span>
+                      <span className="text-slate-600">{u.usedGi} GiB / {u.totalGi} GiB（{u.percent}%）</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={'h-full rounded-full ' + (u.percent > 85 ? 'bg-red-500' : u.percent > 70 ? 'bg-amber-400' : 'bg-emerald-500')}
+                        style={{ width: Math.min(100, u.percent) + '%' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div className="flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-600">自动清理频率</label>
+                    <Select value={storage.cleanup.frequency} onChange={(e) => setStorage({ ...storage, cleanup: { ...storage.cleanup, frequency: e.target.value } })} className="!w-28 !py-1.5 text-xs">
+                      <option value="off">关闭</option>
+                      <option value="daily">每日</option>
+                      <option value="weekly">每周</option>
+                      <option value="monthly">每月</option>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-600">超阈值深度清理</label>
+                    <Input
+                      type="number" min={50} max={99}
+                      value={storage.cleanup.threshold}
+                      onChange={(e) => setStorage({ ...storage, cleanup: { ...storage.cleanup, threshold: Number(e.target.value) } })}
+                      className="!w-20 !py-1.5 text-xs"
+                    /> %
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={saveStoragePolicy}>保存策略</Button>
+                  <span className="text-xs text-slate-400">
+                    {storage.cleanup.lastAt ? '上次清理：' + new Date(storage.cleanup.lastAt).toLocaleString() + '（' + (storage.cleanup.lastMode || '') + '）' : '尚未自动清理'}
+                  </span>
+                </div>
+
+                <div className="flex gap-2 border-t border-slate-100 pt-4">
+                  <Button size="sm" onClick={() => runClean('prune')} disabled={!!cleaning}>
+                    {cleaning === 'prune' ? '清理中…' : '清理构建缓存（prune）'}
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={() => runClean('deep')} disabled={!!cleaning}>
+                    {cleaning === 'deep' ? '清理中…' : '深度清理（image prune）'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-slate-500">加载存储信息失败（仅管理员可见）。</p>
+            )}
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">

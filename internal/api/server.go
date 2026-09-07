@@ -55,6 +55,9 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/api/system/config", s.sysConfig)
 		r.Get("/api/system/settings", s.getSystemSettings)
 		r.Patch("/api/system/settings", s.updateSystemSettings)
+		r.Get("/api/system/storage", s.getStorage)
+		r.Post("/api/system/storage/cleanup", s.cleanStorage)
+		r.Patch("/api/system/storage", s.updateStoragePolicy)
 
 		r.Get("/api/repositories", s.listRepositories)
 		r.Post("/api/repositories", s.createRepository)

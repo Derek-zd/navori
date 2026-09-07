@@ -24,9 +24,10 @@
 #   podman 镜像/构建缓存                 -> /var/lib/containers（PVC 可选）
 #
 # ── 可选 PVC ─────────────────────────────────────────────
-# 下方主清单不含 PVC（缓存随 Pod 重建清空，会自动重新 clone / pull）。
-# 想持久化构建缓存与日志：取消文件尾 PVC 注释，并给 Deployment 加对应
-# volumeMounts / volumes（/data 与 /var/lib/containers）。
+# 下方清单默认挂两块 PVC：podman 构建缓存（/var/lib/containers）与
+# 数据（/data），避免占满节点磁盘并保留层缓存。若想省 PVC，删掉
+# volumeMounts/volumes 与文末两个 PVC 即可（缓存随 Pod 重建清空，
+# 但服务内有定时 + 手动清理兜底）。
 
 ---
 apiVersion: v1
@@ -70,6 +71,9 @@ spec:
           # rootful podman 构建需要特权（挂载 overlay 存储）
           securityContext:
             privileged: true
+          volumeMounts:
+            - { name: data,  mountPath: /data }
+            - { name: build, mountPath: /var/lib/containers }
           readinessProbe:
             httpGet: { path: /api/system/health, port: 3000 }
             initialDelaySeconds: 5
@@ -81,6 +85,11 @@ spec:
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
             limits:   { cpu: "2",    memory: "2Gi" }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: navori-data }
+        - name: build
+          persistentVolumeClaim: { claimName: navori-build }
 ---
 apiVersion: v1
 kind: Service
@@ -111,35 +120,31 @@ spec:
                 name: navori
                 port: { number: 3000 }
 ---
-# ── 可选 PVC（构建缓存 + 日志持久化）───────────────────
-# 取消注释并 apply；同时给 Deployment 主容器加：
-#   volumeMounts:
-#     - { name: data,   mountPath: /data }
-#     - { name: build,  mountPath: /var/lib/containers }
-# 并在 Deployment spec.volumes 加：
-#   volumes:
-#     - { name: data,  persistentVolumeClaim: { claimName: navori-data } }
-#     - { name: build, persistentVolumeClaim: { claimName: navori-build } }
-# apiVersion: v1
-# kind: PersistentVolumeClaim
-# metadata:
-#   name: navori-data
-#   namespace: navori
-# spec:
-#   accessModes: [ReadWriteOnce]
-#   resources:
-#     requests:
-#       storage: 5Gi
-#   # storageClassName: <your-storage-class>
-# ---
-# apiVersion: v1
-# kind: PersistentVolumeClaim
-# metadata:
-#   name: navori-build
-#   namespace: navori
-# spec:
-#   accessModes: [ReadWriteOnce]
-#   resources:
-#     requests:
-#       storage: 20Gi
-#   # storageClassName: <your-storage-class>
+# ── PVC（推荐：podman 构建缓存 + 数据持久化）────────────
+# build = /var/lib/containers（镜像构建缓存与中间层，最占空间，建议 20Gi+）
+# data  = /data（仓库 clone / run 日志）
+# 若集群有默认 StorageClass 可省略 storageClassName。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: navori-data
+  namespace: navori
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: <your-storage-class>
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: navori-build
+  namespace: navori
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: <your-storage-class>

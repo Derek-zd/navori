@@ -80,6 +80,7 @@ func main() {
 	srv.ReapInFlight()
 	srv.StartHealthChecker(context.Background(), time.Duration(cfg.HealthCheckInterval)*time.Minute)
 	srv.StartScheduler(context.Background())
+	srv.StartStorageCleaner(context.Background())
 
 	addr := ":" + cfg.Port
 	log.Printf("navori listening on %s (db=%s)", addr, st.Driver)

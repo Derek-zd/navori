@@ -157,9 +157,14 @@ type NotifyChannel struct {
 	UpdatedAt  time.Time
 }
 
-// AppConfig holds single-row application settings (e.g. global SMTP).
+// AppConfig holds single-row application settings (e.g. global SMTP, storage
+// cleanup policy).
 type AppConfig struct {
-	ID        uint   `gorm:"primaryKey"`
-	SMTPEnc   string `gorm:"type:text"` // encrypted SMTP config JSON
-	UpdatedAt time.Time
+	ID              uint   `gorm:"primaryKey"`
+	SMTPEnc         string `gorm:"type:text"` // encrypted SMTP config JSON
+	CleanupFreq     string `gorm:"size:16;default:daily"` // off|daily|weekly|monthly
+	CleanupPercent  int    `gorm:"default:85"`            // deep-clean when usage exceeds this
+	LastCleanupAt   *time.Time
+	LastCleanupMode string `gorm:"size:16"`
+	UpdatedAt       time.Time
 }
