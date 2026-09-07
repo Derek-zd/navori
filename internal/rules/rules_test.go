@@ -27,6 +27,45 @@ func TestMatchGlob(t *testing.T) {
 	}
 }
 
+func TestPickExactBranch(t *testing.T) {
+	existing := func(names ...string) func(string) bool {
+		set := map[string]bool{}
+		for _, n := range names {
+			set[n] = true
+		}
+		return func(b string) bool { return set[b] }
+	}
+	cases := []struct {
+		name   string
+		rules  []Rule
+		exists func(string) bool
+		want   string
+	}{
+		{"exact main", []Rule{{Branch: "main"}}, existing("main"), "main"},
+		{"exact missing then fallback rule", []Rule{{Branch: "main"}, {Branch: "master"}}, existing("master"), "master"},
+		{"skips glob", []Rule{{Branch: "release/*"}, {Branch: "main"}}, existing("main"), "main"},
+		{"only globs", []Rule{{Branch: "**"}}, nil, ""},
+		{"no rules", nil, nil, ""},
+		{"exact but not on remote", []Rule{{Branch: "main"}}, existing("master"), ""},
+	}
+	for _, c := range cases {
+		if got := PickExactBranch(c.rules, c.exists); got != c.want {
+			t.Errorf("%s: PickExactBranch = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestIsExact(t *testing.T) {
+	for p, want := range map[string]bool{
+		"main": true, "master": true, "release/v1.2": true,
+		"**": false, "*": false, "release/*": false, "feat?x": false, "v[0-9]": false,
+	} {
+		if got := IsExact(p); got != want {
+			t.Errorf("IsExact(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestMerge(t *testing.T) {
 	defaults := map[string]interface{}{
 		"dockerfilePath": "Dockerfile",

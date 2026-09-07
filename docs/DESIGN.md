@@ -163,7 +163,7 @@
 - 去重：commit sha 落 webhook_events，同 sha 已跑过 → 跳过并记审计；可手动重跑打破。
 - 取消：context 级联；build 杀进程组；deploy 阶段不可中断（已知限制，同 aiops）。
 - 日志：每 step 一个文件，DB 只存路径，SSE 按行 tail。
-- 快照与重跑：每 run 存 config_snapshot_json（分支规则解析后的最终配置）。「重跑」回放快照（同 commit + 同解析配置），确定可复现；「运行」拉默认分支最新 HEAD 用当前配置。
+- 快照与重跑：每 run 存 config_snapshot_json（分支规则解析后的最终配置）。「重跑」回放快照（同 commit + 同解析配置），确定可复现；「运行」拉流水线规则命中的分支最新 HEAD 用当前配置（规则无精确分支时用默认分支）。
 
 ### 重启语义（reaper）
 
@@ -186,14 +186,14 @@
 
 - 分支名清洗：小写 → 非法字符换 - → 去首尾 .- → 截 60 字符 → 空则回退 branch。
 - 最终 tag 校验：匹配 [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}。
-- 手动运行弹窗可临时覆盖 tag 模板与全局变量（不影响已保存配置），满足「打特定版本」。
+- 手动运行走流水线保存的规则（分支目标 = 规则中首个存在的精确分支，如 main；规则留空/纯 glob 才用仓库默认分支），不要求前端传参；API 可选传 ref 覆盖分支。
 
 ## 9. 触发
 
 | 类型 | 实现 |
 |---|---|
 | webhook | 单入口 /api/webhooks；支持通用格式 {ref, commit, repo_url} 与 GitLab push 原生格式；每流水线 secret token 校验；按仓库 URL 归一化路由；payload digest 去重 |
-| 手动 | 「运行」（默认分支 HEAD）/「重跑」（快照回放） |
+| 手动 | 「运行」（规则精确分支优先，否则默认分支 HEAD）/「重跑」（快照回放） |
 | 定时 | 每流水线可配 cron 表达式 |
 
 所有入口统一走 triggerPipeline(pipelineId, triggerType, ref, commit, params)，保证日志与审计一致。

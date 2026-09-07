@@ -178,7 +178,7 @@ GET /api/pipelines/{id} → 200 { data: Pipeline }
 PATCH /api/pipelines/{id} → 200 { data: Pipeline }
 DELETE /api/pipelines/{id} → 200 { data: {} }
 POST /api/pipelines/{id}/run
-    body: { ref?, tagOverride?, vars? }   // 手动运行；缺省 = 默认分支最新 HEAD
+    body: { ref?, tagOverride?, vars? }   // 手动运行；缺省 = 流水线分支规则中首个精确分支（若存在），否则仓库默认分支，最新 HEAD
     → 202 { data: { runId, number } }
 
 PipelineConfig（defaults）= {

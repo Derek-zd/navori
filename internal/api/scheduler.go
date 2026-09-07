@@ -45,22 +45,20 @@ func (s *Server) triggerScheduled(p *store.Pipeline) {
 	if err := s.DB.DB.First(&repo, p.RepoID).Error; err != nil {
 		return
 	}
-	head, err := gitx.RemoteHead(s.cloneURL(&repo))
+	// cron runs the branch this pipeline is configured for, same as a manual
+	// run — the pipeline's rules define what it runs, not the repo default.
+	branch := s.pickRunBranch(p, &repo)
+	head, err := gitx.RemoteBranchHead(s.cloneURL(&repo), branch)
 	if err != nil {
-		log.Printf("scheduled ls-remote pipeline %d failed: %v", p.ID, err)
+		log.Printf("scheduled ls-remote pipeline %d branch %s failed: %v", p.ID, branch, err)
 		return
 	}
 	var last store.Run
 	if err := s.DB.DB.Where("pipeline_id = ?", p.ID).Order("id desc").First(&last).Error; err == nil && last.Commit != "" && last.Commit == head {
 		log.Printf("scheduled skip pipeline %d: no new commit %s", p.ID, head)
-		return // no new commit on default branch
+		return // no new commit on the target branch
 	}
-	// cron targets the remote's actual default branch (self-heals stale value)
-	branch := s.resolveDefaultBranch(&repo)
-	config, ok := s.resolveForBranch(p, &repo, branch)
-	if !ok {
-		return
-	}
+	config := s.configForBranch(p, branch)
 	if _, err := s.trigger(p, &repo, "cron", "", branch, head, config); err != nil {
 		log.Printf("scheduled run pipeline %d failed: %v", p.ID, err)
 	}

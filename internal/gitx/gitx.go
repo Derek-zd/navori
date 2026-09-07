@@ -79,18 +79,27 @@ func runW(dir string, w io.Writer, args ...string) error {
 	return nil
 }
 
-// RemoteHead returns the remote HEAD commit sha via git ls-remote.
-func RemoteHead(url string) (string, error) {
-	cmd := exec.Command("git", "ls-remote", url, "HEAD")
+// RemoteBranchHead returns the commit sha a branch points at on the remote.
+func RemoteBranchHead(url, branch string) (string, error) {
+	cmd := exec.Command("git", "ls-remote", url, "refs/heads/"+branch)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote: %w", err)
+		return "", fmt.Errorf("git ls-remote %s: %w", branch, err)
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
 	if len(fields) == 0 {
-		return "", fmt.Errorf("git ls-remote: no HEAD")
+		return "", fmt.Errorf("git ls-remote %s: branch not found", branch)
 	}
 	return fields[0], nil
+}
+
+// BranchExists reports whether branch exists on the remote.
+func BranchExists(url, branch string) (bool, error) {
+	_, err := RemoteBranchHead(url, branch)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // HeadCommit returns the current HEAD commit sha.

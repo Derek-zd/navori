@@ -29,20 +29,44 @@ func TestFindDockerfile(t *testing.T) {
 	}
 }
 
-func TestRemoteDefaultBranch(t *testing.T) {
+func initRepo(t *testing.T, defaultBranch string) string {
+	t.Helper()
 	repo := t.TempDir()
-	runGit(t, repo, "init", "-b", "master", ".")
+	runGit(t, repo, "init", "-b", defaultBranch, ".")
 	write(t, filepath.Join(repo, "README.md"), "hi")
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init")
+	return repo
+}
 
-	url := "file://" + repo
+func TestRemoteDefaultBranch(t *testing.T) {
+	url := "file://" + initRepo(t, "master")
 	got, err := RemoteDefaultBranch(url)
 	if err != nil {
 		t.Fatalf("RemoteDefaultBranch: %v", err)
 	}
 	if got != "master" {
 		t.Errorf("default branch = %q, want master", got)
+	}
+}
+
+func TestBranchExistsAndHead(t *testing.T) {
+	repo := initRepo(t, "master")
+	runGit(t, repo, "checkout", "-b", "main")
+	url := "file://" + repo
+
+	if ok, err := BranchExists(url, "main"); err != nil || !ok {
+		t.Errorf("BranchExists(main) = %v, %v; want true", ok, err)
+	}
+	if ok, err := BranchExists(url, "nope"); err == nil || ok {
+		t.Errorf("BranchExists(nope) = %v, %v; want false/error", ok, err)
+	}
+	sha, err := RemoteBranchHead(url, "main")
+	if err != nil || sha == "" {
+		t.Errorf("RemoteBranchHead(main) = %q, %v", sha, err)
+	}
+	if _, err := RemoteBranchHead(url, "nope"); err == nil {
+		t.Error("RemoteBranchHead(nope) should error")
 	}
 }
 

@@ -38,6 +38,47 @@ func (s *Server) resolveForBranch(p *store.Pipeline, repo *store.Repository, bra
 	return cfg, ok
 }
 
+// configForBranch returns the effective config for a run on branch. Unlike
+// resolveForBranch it never "rejects": a matching rule's overrides are merged
+// over defaults when the branch hits a rule; otherwise plain defaults are
+// returned. This is the right behaviour for manual/cron runs — the user asked
+// to run the pipeline, so the run proceeds with the base config even if no
+// rule matches the branch. (Webhook keep using resolveForBranch, where a
+// non-matching branch means "this push is not for this pipeline".)
+func (s *Server) configForBranch(p *store.Pipeline, branch string) map[string]interface{} {
+	var defaults map[string]interface{}
+	_ = json.Unmarshal([]byte(p.ConfigJSON), &defaults)
+	if defaults == nil {
+		defaults = map[string]interface{}{}
+	}
+	var brs []rules.Rule
+	_ = json.Unmarshal([]byte(p.BranchRulesJSON), &brs)
+	if cfg, ok := rules.Resolve(defaults, brs, branch); ok {
+		return cfg
+	}
+	return defaults
+}
+
+// pickRunBranch decides which branch a manual/cron run (no explicit ref)
+// targets. The pipeline's stored branch rules define what the pipeline runs:
+// the first exact branch in the rules that actually exists on the remote wins
+// (e.g. a rule of "main" makes the pipeline run main even if the repository's
+// default branch is "master"). When rules are empty or only globs, the remote
+// default branch is used.
+func (s *Server) pickRunBranch(p *store.Pipeline, repo *store.Repository) string {
+	var brs []rules.Rule
+	_ = json.Unmarshal([]byte(p.BranchRulesJSON), &brs)
+	url := s.cloneURL(repo)
+	exists := func(b string) bool {
+		ok, err := gitx.BranchExists(url, b)
+		return err == nil && ok
+	}
+	if b := rules.PickExactBranch(brs, exists); b != "" {
+		return b
+	}
+	return s.resolveDefaultBranch(repo)
+}
+
 // resolveDefaultBranch returns the remote's actual default branch, self-healing
 // a stale stored value (repos created before auto-detection may carry a
 // hard-coded "main" even though the remote default is e.g. "master"). Callers

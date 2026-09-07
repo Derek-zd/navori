@@ -180,22 +180,18 @@ func (s *Server) runPipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	branch := repo.DefaultBranch
+	branch := ""
 	ref := ""
 	if req.Ref != "" {
+		// explicit ref: run exactly that branch (tag or branch)
 		ref = req.Ref
 		branch = stripRef(req.Ref)
 	} else {
-		// No explicit ref: run the remote's actual default branch, so branch
-		// rules and the branch actually pulled stay consistent even if the
-		// stored default branch is stale (e.g. hard-coded "main").
-		branch = s.resolveDefaultBranch(&repo)
+		// no ref from the UI: run the branch this pipeline is configured for
+		// (first exact branch rule that exists, else the repo default).
+		branch = s.pickRunBranch(&p, &repo)
 	}
-	config, ok := s.resolveForBranch(&p, &repo, branch)
-	if !ok {
-		fail(w, http.StatusBadRequest, "E_VALIDATION", "branch not allowed by rules")
-		return
-	}
+	config := s.configForBranch(&p, branch)
 	run, err := s.trigger(&p, &repo, "manual", ref, branch, "", config)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())

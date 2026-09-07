@@ -5,6 +5,30 @@ import (
 	"strings"
 )
 
+// IsExact reports whether a rule branch is an exact branch name rather than a
+// glob pattern. "main" -> true; "release/*", "**", "feat?x" -> false.
+func IsExact(pattern string) bool {
+	return !strings.ContainsAny(pattern, "*?[")
+}
+
+// PickExactBranch returns the first exact (non-glob) branch from rules that
+// the exists predicate confirms, or "" when no exact branch applies. It models
+// "which branch this pipeline is configured to run" for manual/cron triggers:
+// a pipeline whose rule says "main" is a main-branch pipeline even if the
+// repository's default branch is "master". Callers fall back to the repo
+// default branch when this returns "".
+func PickExactBranch(rules []Rule, exists func(string) bool) string {
+	for _, r := range rules {
+		if !IsExact(r.Branch) {
+			continue
+		}
+		if exists == nil || exists(r.Branch) {
+			return r.Branch
+		}
+	}
+	return ""
+}
+
 // MatchGlob reports whether branch matches pattern.
 // * matches within a path segment; ** matches across segments (including /).
 func MatchGlob(pattern, branch string) bool {
