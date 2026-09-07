@@ -107,6 +107,11 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	if branch == "" {
 		branch = s.resolveDefaultBranch(repo)
 	}
+	// Store a concrete ref so run lists / notifications / reruns always show
+	// which branch ran: manual & cron triggers have no incoming ref, so derive
+	// refs/heads/<branch> from the resolved branch (webhook refs already carry
+	// the full ref).
+	ref = normalizeRef(ref, branch)
 
 	now := time.Now()
 	cfgJSON, _ := json.Marshal(config)
@@ -222,4 +227,18 @@ func nextRunNumber(db *gorm.DB, pipelineID uint) int {
 	var max int
 	db.Model(&store.Run{}).Where("pipeline_id = ?", pipelineID).Select("COALESCE(MAX(number), 0)").Scan(&max)
 	return max + 1
+}
+
+// normalizeRef returns a concrete git ref for a run. Incoming refs (webhook
+// events, ref-specified manual runs) pass through unchanged; an empty ref with
+// a known branch becomes refs/heads/<branch> so manual/cron runs record which
+// branch they actually ran.
+func normalizeRef(ref, branch string) string {
+	if ref != "" {
+		return ref
+	}
+	if branch == "" {
+		return ""
+	}
+	return "refs/heads/" + branch
 }

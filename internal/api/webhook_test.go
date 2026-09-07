@@ -42,3 +42,20 @@ func TestNormalizeGitURL(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeRef(t *testing.T) {
+	cases := []struct {
+		ref, branch, want string
+	}{
+		{"refs/heads/main", "main", "refs/heads/main"}, // webhook/manual explicit ref passthrough
+		{"refs/tags/v1.0", "v1.0", "refs/tags/v1.0"},   // tag ref passthrough
+		{"", "main", "refs/heads/main"},                // manual/cron: derive from branch
+		{"", "master", "refs/heads/master"},
+		{"", "", ""}, // nothing known
+	}
+	for _, c := range cases {
+		if got := normalizeRef(c.ref, c.branch); got != c.want {
+			t.Errorf("normalizeRef(%q,%q) = %q, want %q", c.ref, c.branch, got, c.want)
+		}
+	}
+}
