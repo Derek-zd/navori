@@ -227,7 +227,7 @@
 
 ## 10. 部署与审批
 
-- 部署：kubectl set image {kind}/{name} {container}={image} -n {ns} → kubectl rollout status --timeout=5m → 全部容器就绪判定（aiops 同款严格判定）→ 失败且非首次部署自动 rollout undo。
+- 部署：kubectl set image {kind}/{name} {container}={image} -n {ns} → 若副本数>0 则 kubectl rollout status --timeout=5m（全部容器就绪判定，失败自动 rollout undo）；副本数=0（缩容到零）时无 rollout 可等，set image 成功即视为部署完成。
 - 审批：deploy.approval=true 时，deploy 步骤进入 awaiting_approval；admin（或 approvers 名单内用户）点通过/拒绝；拒绝 → run=rejected。审批动作写 audit_logs。
 - 多容器：容器名==镜像名自动对应，配不上的显式映射，未映射容器不动（绝不清空）。
 

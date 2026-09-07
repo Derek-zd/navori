@@ -322,6 +322,13 @@ func (s *Server) stepDeploy(ctx context.Context, w io.Writer, rc resolvedConfig,
 	if err := deploy.SetImage(ctx, w, t); err != nil {
 		return err
 	}
+	// 0-replica workloads (scaled-to-zero) have no rollout to wait for:
+	// set image succeeding is the whole deployment. Anything else waits for
+	// the rollout and rolls back on failure.
+	if replicas, _ := deploy.Replicas(ctx, w, t); replicas == 0 {
+		fmt.Fprintf(w, "  副本数: 0 —— 无 rollout 可等待,镜像已更新(set image 成功即部署完成)\n")
+		return nil
+	}
 	if err := deploy.RolloutStatus(ctx, w, t, "5m"); err != nil {
 		_ = deploy.RolloutUndo(ctx, w, t)
 		return err
