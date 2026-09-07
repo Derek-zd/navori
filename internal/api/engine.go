@@ -352,16 +352,17 @@ func (s *Server) notifyTerminal(run *store.Run, repo *store.Repository) {
 	}
 
 	ev := notify.Event{
-		"event":       "run.finished",
-		"pipelineId":  fresh.PipelineID,
-		"repo":        repo.Name,
-		"branch":      stripRef(fresh.Ref),
-		"commit":      fresh.Commit,
-		"commitShort": shortCommit(fresh.Commit),
-		"status":      fresh.Status,
-		"imageTag":    fresh.ImageTag,
-		"error":       fresh.Error,
-		"finishedAt":  timeStr(fresh.FinishedAt),
+		"event":         "run.finished",
+		"pipelineId":    fresh.PipelineID,
+		"pipelineGroup": p.Group,
+		"repo":          repo.Name,
+		"branch":        stripRef(fresh.Ref),
+		"commit":        fresh.Commit,
+		"commitShort":   shortCommit(fresh.Commit),
+		"status":        fresh.Status,
+		"imageTag":      fresh.ImageTag,
+		"error":         fresh.Error,
+		"finishedAt":    timeStr(fresh.FinishedAt),
 	}
 
 	// legacy single webhook

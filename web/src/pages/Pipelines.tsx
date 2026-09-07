@@ -6,6 +6,13 @@ import type { DeployTarget, NotifyChannel, Pipeline, Registry, Repository, Varia
 import { Button, Card, EmptyState, Input, Modal, PageHeader, Select, Status, Toast, useToast } from '../components/ui'
 
 const WORKLOAD_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob']
+const NOTIFY_EVENTS: [string, string][] = [
+  ['success', '成功'],
+  ['failed', '失败'],
+  ['cancelled', '取消'],
+  ['rejected', '拒绝'],
+]
+const ALL_NOTIFY_EVENTS = NOTIFY_EVENTS.map(([ev]) => ev)
 
 export default function Pipelines() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
@@ -58,6 +65,10 @@ export default function Pipelines() {
 
   function repoName(id: number) {
     return repos.find((r) => r.id === id)?.name || ('#' + id)
+  }
+
+  function deployTargetName(id: number) {
+    return dts.find((t) => t.id === id)?.name || ''
   }
 
   const filteredPipelines = useMemo(() => {
@@ -119,7 +130,9 @@ export default function Pipelines() {
     setPipeVars(Object.entries(pv).map(([k, v]) => ({ key: k, value: v })))
     const nf = (p.notify || {}) as Record<string, any>
     const chans = (nf.channels || []) as { id: number; events?: string[] }[]
-    setNotifyBindings(chans.map((c) => ({ channelId: Number(c.id), events: c.events || [] })))
+    // empty events means "notify all terminal states" (backend semantics), so
+    // show that as all checked rather than none
+    setNotifyBindings(chans.map((c) => ({ channelId: Number(c.id), events: (c.events && c.events.length > 0) ? c.events : [...ALL_NOTIFY_EVENTS] })))
     setShowModal(true)
   }
 
@@ -259,12 +272,17 @@ export default function Pipelines() {
                         <span key={r.branch} className="mr-1.5 rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">{r.branch}</span>
                       ))}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
+                    <td className="px-4 py-3 text-xs">
                       {d.name ? (
-                        <span>
-                          {d.kind || 'Deployment'} · {d.name}
-                          {d.namespace ? ' · ' + d.namespace : ''}
-                        </span>
+                        <div className="space-y-0.5">
+                          {deployTargetName(d.targetId) ? (
+                            <div className="font-medium text-slate-700">{deployTargetName(d.targetId)}</div>
+                          ) : null}
+                          <div className="text-slate-500">
+                            {d.namespace ? d.namespace + ' · ' : ''}
+                            <span className="font-mono text-slate-600">{d.kind || 'Deployment'}:{d.name}</span>
+                          </div>
+                        </div>
                       ) : '—'}
                     </td>
                     <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-slate-500">{p.webhookUrl}</td>
@@ -475,9 +493,7 @@ export default function Pipelines() {
                     </Button>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-4">
-                    {[
-                      ['success', '成功'], ['failed', '失败'], ['cancelled', '取消'], ['rejected', '拒绝'],
-                    ].map(([ev, label]) => (
+                    {NOTIFY_EVENTS.map(([ev, label]) => (
                       <label key={ev} className="flex items-center gap-1.5 text-sm text-slate-600">
                         <input type="checkbox" checked={(b.events || []).includes(ev)} onChange={(e) => {
                           const n = [...notifyBindings]
@@ -492,7 +508,7 @@ export default function Pipelines() {
                 </div>
               ))}
             </div>
-            <Button type="button" variant="ghost" onClick={() => setNotifyBindings([...notifyBindings, { channelId: 0, events: [] }])} className="mt-2">
+            <Button type="button" variant="ghost" onClick={() => setNotifyBindings([...notifyBindings, { channelId: 0, events: [...ALL_NOTIFY_EVENTS] }])} className="mt-2">
               <Plus size={15} />
               添加通道
             </Button>

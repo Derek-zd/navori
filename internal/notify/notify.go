@@ -47,6 +47,22 @@ func hmacSHA256(secret string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// statusIcon maps a run status to a small unicode marker for IM messages.
+func statusIcon(status string) string {
+	switch status {
+	case "success":
+		return "✅"
+	case "failed":
+		return "❌"
+	case "cancelled", "rejected":
+		return "⏹️"
+	case "running", "pending", "awaiting_approval":
+		return "⏳"
+	default:
+		return "•"
+	}
+}
+
 // SendChannel dispatches an event to a notification channel by type.
 // cfg is the decrypted channel config map.
 func SendChannel(typ string, cfg map[string]interface{}, ev Event) error {
@@ -73,20 +89,36 @@ func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 	if url == "" {
 		return fmt.Errorf("%s channel missing webhook", typ)
 	}
-	event, _ := ev["event"].(string)
 	status, _ := ev["status"].(string)
 	pipeline, _ := ev["pipelineId"].(float64)
+	repo, _ := ev["repo"].(string)
+	group, _ := ev["pipelineGroup"].(string)
 	image, _ := ev["imageTag"].(string)
 	commit, _ := ev["commitShort"].(string)
-	line := fmt.Sprintf("**Navori 通知**\n事件: %s\n流水线: #%.0f\n状态: %s\n镜像: %s\ncommit: %s", event, pipeline, status, image, commit)
+	branch, _ := ev["branch"].(string)
+
+	name := repo
+	if name == "" {
+		name = fmt.Sprintf("流水线 #%.0f", pipeline)
+	}
+	displayName := name
+	if group != "" {
+		displayName = group + "/" + name
+	}
+	mdTitle := fmt.Sprintf("**%s %s**", statusIcon(status), displayName)
+	// feishu text messages do not render markdown; keep plain lines
+	plainLine := fmt.Sprintf("%s %s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+		statusIcon(status), displayName, status, pipeline, branch, image, commit)
+	mdLine := fmt.Sprintf("%s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+		mdTitle, status, pipeline, branch, image, commit)
 	var payload interface{}
 	switch typ {
 	case "feishu":
-		payload = map[string]interface{}{"msg_type": "text", "content": map[string]interface{}{"text": line}}
+		payload = map[string]interface{}{"msg_type": "text", "content": map[string]interface{}{"text": plainLine}}
 	case "dingtalk":
-		payload = map[string]interface{}{"msgtype": "markdown", "markdown": map[string]interface{}{"title": "Navori 通知", "text": line}}
+		payload = map[string]interface{}{"msgtype": "markdown", "markdown": map[string]interface{}{"title": "Navori 通知", "text": mdLine}}
 	default: // wecom
-		payload = map[string]interface{}{"msgtype": "markdown", "markdown": map[string]interface{}{"content": line}}
+		payload = map[string]interface{}{"msgtype": "markdown", "markdown": map[string]interface{}{"content": mdLine}}
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -123,8 +155,13 @@ func sendEmail(cfg map[string]interface{}, ev Event) error {
 	addr := host + ":" + strconv.Itoa(port)
 	status, _ := ev["status"].(string)
 	pipeline, _ := ev["pipelineId"].(float64)
-	subject := fmt.Sprintf("[Navori] 流水线 #%.0f 状态: %s", pipeline, status)
-	body := fmt.Sprintf("流水线完成\n状态: %s\n镜像: %v\n错误: %v", status, ev["imageTag"], ev["error"])
+	repo, _ := ev["repo"].(string)
+	name := repo
+	if name == "" {
+		name = fmt.Sprintf("流水线 #%.0f", pipeline)
+	}
+	subject := fmt.Sprintf("[Navori] %s 状态: %s", name, status)
+	body := fmt.Sprintf("流水线: %s (#%.0f)\n状态: %s\n镜像: %v\n错误: %v", name, pipeline, status, ev["imageTag"], ev["error"])
 	msg := []byte("To: " + toRaw + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n")
 	auth := smtp.PlainAuth("", username, password, host)
 	if err := smtp.SendMail(addr, auth, from, strings.Split(toRaw, ","), msg); err != nil {
