@@ -1,8 +1,14 @@
-# Navori Kubernetes 部署模板（MySQL 模式）
+# Navori Kubernetes 部署模板（MySQL 模式，rootful podman + privileged）
 # 使用方法：
 #   1. 替换下方所有 <...> 占位值（镜像地址、密钥、MySQL DSN、域名等）
 #   2. kubectl create namespace navori
 #   3. kubectl apply -f navori.yaml
+#
+# ── 重要：为什么需要 privileged ────────────────────────────
+# 镜像内置 rootful podman 作为镜像构建器（与 aiops 同款方案），构建时
+# 需要挂载 overlay 存储，因此 Pod 必须 privileged: true。若你的集群禁止
+# privileged，本方案不可用（rootless/vfs 路线在托管集群不可靠，见 DESIGN
+# §4.1 与 Git 历史）。
 #
 # 生成密钥：
 #   openssl rand -hex 32   # -> MASTER_KEY
@@ -14,26 +20,13 @@
 # ── 数据分层 ─────────────────────────────────────────────
 #   业务状态（仓库/流水线/run/凭据密文）  -> MySQL
 #   密钥（MASTER_KEY/JWT_SECRET）        -> 下方 Secret 注入（重启不失效）
-#   仓库克隆缓存 + run 日志              -> /data；PVC 可选（见文件尾注释）
+#   仓库克隆缓存 + run 日志              -> /data（PVC 可选，见文件尾）
+#   podman 镜像/构建缓存                 -> /var/lib/containers（PVC 可选）
 #
-# ── 是否挂 PVC ───────────────────────────────────────────
-#   不挂（默认）：缓存/日志在容器可写层，Pod 删除即清空，重启自动重新 clone。
-#   想保留历史日志：取消下方 PVC 与 volume 相关注释即可（StorageClass 按需改）。
-#
-# ── 集群强制非 root（PSA restricted）时 ──────────────────
-#   镜像默认以 root 启动 entrypoint（chown /data 后 su-exec 降权到 uid 1000），
-#   该流程被 runAsNonRoot 禁止时，改 Deployment spec 为：
-#     securityContext:
-#       runAsNonRoot: true
-#       runAsUser: 1000
-#       fsGroup: 1000
-#     initContainers:
-#       - name: fix-data-dir
-#         image: busybox:1.36
-#         command: ["sh", "-c", "chown -R 1000:1000 /data 2>/dev/null || true"]
-#         securityContext: { runAsUser: 0 }
-#         volumeMounts: [{ name: data, mountPath: /data }]   # 仅挂 PVC 时需要
-#   并给主容器加 emptyDir 挂 /run（podman XDG_RUNTIME_DIR 需要可写目录）。
+# ── 可选 PVC ─────────────────────────────────────────────
+# 下方主清单不含 PVC（缓存随 Pod 重建清空，会自动重新 clone / pull）。
+# 想持久化构建缓存与日志：取消文件尾 PVC 注释，并给 Deployment 加对应
+# volumeMounts / volumes（/data 与 /var/lib/containers）。
 
 ---
 apiVersion: v1
@@ -68,14 +61,15 @@ spec:
     metadata:
       labels: { app: navori }
     spec:
-      # 默认以 root 启动一次（entrypoint chown /data 后 su-exec 降到 uid 1000），
-      # 无需 runAsNonRoot。若集群强制非 root(PSA restricted)，见本文件头部注释。
       containers:
         - name: navori
           image: <your-registry>/navori:latest
           ports: [{ containerPort: 3000 }]
           envFrom:
             - secretRef: { name: navori-env }
+          # rootful podman 构建需要特权（挂载 overlay 存储）
+          securityContext:
+            privileged: true
           readinessProbe:
             httpGet: { path: /api/system/health, port: 3000 }
             initialDelaySeconds: 5
@@ -117,14 +111,15 @@ spec:
                 name: navori
                 port: { number: 3000 }
 ---
-# ── 可选：保留仓库克隆缓存 + run 日志 ──────────────────
-# 取消下面的注释并 apply，同时在 Deployment 的 spec 下加：
-#   volumes:
-#     - name: data
-#       persistentVolumeClaim: { claimName: navori-data }
-# 在 containers[0] 下加：
+# ── 可选 PVC（构建缓存 + 日志持久化）───────────────────
+# 取消注释并 apply；同时给 Deployment 主容器加：
 #   volumeMounts:
-#     - { name: data, mountPath: /data }
+#     - { name: data,   mountPath: /data }
+#     - { name: build,  mountPath: /var/lib/containers }
+# 并在 Deployment spec.volumes 加：
+#   volumes:
+#     - { name: data,  persistentVolumeClaim: { claimName: navori-data } }
+#     - { name: build, persistentVolumeClaim: { claimName: navori-build } }
 # apiVersion: v1
 # kind: PersistentVolumeClaim
 # metadata:
@@ -134,5 +129,17 @@ spec:
 #   accessModes: [ReadWriteOnce]
 #   resources:
 #     requests:
-#       storage: 10Gi
+#       storage: 5Gi
+#   # storageClassName: <your-storage-class>
+# ---
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: navori-build
+#   namespace: navori
+# spec:
+#   accessModes: [ReadWriteOnce]
+#   resources:
+#     requests:
+#       storage: 20Gi
 #   # storageClassName: <your-storage-class>

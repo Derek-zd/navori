@@ -44,7 +44,7 @@ Navori 是一个「git 托管平台无关」、单容器可启动、带 Web 界�
 |---|---|
 | 无 DSL | v1 纯 UI 表单配置，不解析 Jenkinsfile / YAML |
 | 存储 | SQLite 默认 / MySQL 可选，store 接口 + GORM AutoMigrate |
-| 构建 | docker/podman（shell 调用），容器内 podman rootless |
+| 构建 | docker/podman（shell 调用），容器内 rootful podman + privileged（与 aiops 同款、已验证）；裸机用宿主 docker |
 | 部署 | kubectl set image + rollout status + 失败回滚 |
 | 认证 | JWT httpOnly cookie（navori_token）+ admin/user 两级 |
 | 命名 | Go snake_case / JSON camelCase / 路径 kebab-case / 错误码 E_UPPER_SNAKE |

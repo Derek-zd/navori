@@ -62,11 +62,11 @@ docker build \
   -t navori:latest .
 ```
 
-镜像内嵌前端，内置 podman rootless（软链为 `docker`）作为业务镜像构建器，K8s Pod 内可直接 build/push，**无需宿主 docker socket、无需 privileged**。运行：
+镜像内嵌前端，内置 **rootful podman**（软链为 `docker`，与 aiops 同款方案）作为业务镜像构建器。K8s Pod 内直接 build/push 需要 **`privileged: true`**（构建时挂载 overlay 存储），裸机/单机 docker run 需要加 `--privileged`。运行：
 
 ```bash
-# 裸机/单机：数据目录挂出来（可选）
-docker run -d --name navori -p 3000:3000 \
+# 裸机/单机：privileged 供 podman 挂载 overlay；数据目录挂出来（可选）
+docker run -d --name navori -p 3000:3000 --privileged \
   -e ADMIN_PASSWORD=your-password -e MASTER_KEY=$(openssl rand -hex 32) \
   -v navori-data:/data navori:latest
 ```
@@ -81,8 +81,8 @@ K8s 部署（MySQL + Secret 注入密钥）直接用模板：[examples/k8s/navor
 
 ## 构建执行形态
 
-构建镜像时 shell 出 docker/podman。容器部署推荐「podman rootless」（无需宿主 docker、无需 privileged），
-裸机部署则要求宿主安装 docker/podman + git + kubectl。详见 docs/DESIGN.md §4.1。
+构建镜像时 shell 出 docker/podman。K8s 容器部署采用 **rootful podman + privileged**（与 aiops 同款、已验证）；
+裸机部署则直接使用宿主 docker/podman + git + kubectl。详见 docs/DESIGN.md §4.1。
 
 ## 项目结构
 

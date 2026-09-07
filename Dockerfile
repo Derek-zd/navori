@@ -23,14 +23,12 @@ COPY --from=fe /src/dist ./web/dist
 RUN go build -trimpath -o /navori ./cmd/server
 
 # ---- runtime ----
-# Self-contained builder: podman rootless builds/pushes business images inside
-# the pod — no host docker socket, no privileged container (DESIGN §4.1).
+# Self-contained builder: podman builds/pushes business images inside the pod.
 # podman is symlinked to docker so the engine's `docker` shell-outs work.
 #
-# Storage driver: vfs. Rootless overlay/fuse-overlayfs needs unprivileged
-# mounts which managed K8s nodes usually deny ("configure storage: mount ...
-# permission denied"). vfs performs no mounts at all — slow but works on any
-# cluster. graphRoot lives under /data (writable, PVC-able).
+# This image runs podman ROOTFUL (container starts as root, no su-exec drop),
+# matching aiops' proven deployment: the pod must run privileged so podman can
+# mount the overlay storage driver. See examples/k8s/navori.yaml.
 #
 # ALPINE_MIRROR: only rewrite /etc/apk/repositories when explicitly set, e.g.
 #   docker build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine .
@@ -41,42 +39,21 @@ ARG ALPINE_MIRROR=
 RUN if [ -n "$ALPINE_MIRROR" ]; then \
       printf '%s/v3.20/main\n%s/v3.20/community\n' "$ALPINE_MIRROR" "$ALPINE_MIRROR" > /etc/apk/repositories; \
     fi \
-    && apk add --no-cache git kubectl podman fuse-overlayfs shadow su-exec ca-certificates tzdata \
+    && apk add --no-cache git kubectl podman fuse-overlayfs shadow ca-certificates tzdata \
     && ln -s /usr/bin/podman /usr/local/bin/docker \
     && mkdir -p /etc/containers \
-    && printf '[storage]\ndriver = "vfs"\ngraphRoot = "/data/containers/storage"\nrunRoot = "/run/user/1000/containers"\n' > /etc/containers/storage.conf
-# Run as a non-root user so podman rootless works (needs subuid/subgid range).
-RUN adduser -D -u 1000 navori && \
-    echo "navori:100000:65536" >> /etc/subuid && \
-    echo "navori:100000:65536" >> /etc/subgid
-# Rootless podman reads the per-user storage.conf (overrides /etc); point it
-# at the same vfs setup so both code paths agree.
-RUN mkdir -p /home/navori/.config/containers \
-    && printf '[storage]\ndriver = "vfs"\ngraphRoot = "/data/containers/storage"\nrunRoot = "/run/user/1000/containers"\n' > /home/navori/.config/containers/storage.conf \
-    && chown -R navori:navori /home/navori/.config
-# Pre-create writable dirs owned by navori as a fallback; entrypoint re-chowns
-# DATA_DIR and XDG_RUNTIME_DIR at boot when started as root (mounts are root-owned).
-RUN mkdir -p /data /run/user/1000 && chown -R navori:navori /data /run/user/1000
+    && printf '[storage]\ndriver = "overlay"\ngraphRoot = "/var/lib/containers/storage"\nrunRoot = "/run/containers/storage"\n' > /etc/containers/storage.conf
 COPY --from=build /navori /usr/local/bin/navori
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
 # Only runtime-mechanism env vars are baked in here. Business config
-# (PORT/DB_*/DATA_DIR/MASTER_KEY/...) must come from config file or real env,
+# (PORT/DB_*/MASTER_KEY/...) must come from config file or real env,
 # NOT from image ENV — otherwise the image defaults would always override
 # user config (env > config file by design). navori's code defaults apply when
-# neither is set. Data dir defaults to /data via the WORKDIR below when the
-# user doesn't configure it.
-ENV XDG_RUNTIME_DIR=/run/user/1000 \
-    _CONTAINERS_USERNS_CONFIGURED="" \
+# neither is set. DATA_DIR=/data only affects the container image (the bare
+# binary inherits nothing here); user-set DATA_DIR still wins.
+ENV DATA_DIR=/data \
     BUILDAH_FORMAT=docker \
-    # chroot isolation: builds RUN steps without mount namespaces, so image
-    # builds work on managed K8s / unprivileged runtimes that deny
-    # unprivileged proc/overlay mounts ("mount proc: Operation not permitted").
-    BUILDAH_ISOLATION=chroot \
     PODMAN_IGNORE_CGROUPSV1_WARNING=1
 EXPOSE 3000
-# NOTE: no USER directive on purpose — entrypoint starts as root, chowns the
-# data/runtime dirs (covers PVC mounts), then drops to navori via su-exec.
 VOLUME ["/data"]
 WORKDIR /data
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["navori"]

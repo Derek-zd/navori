@@ -73,9 +73,9 @@
 |---|---|---|
 | 裸机直接运行二进制 | 宿主机的 docker/podman | 服务器需安装 dockerd（或 podman） |
 | 容器 + 挂载 docker.sock | 宿主机的 dockerd | 容器内只需 docker CLI；`-v /var/run/docker.sock:/var/run/docker.sock`；代价是把宿主 docker 能力交给容器 |
-| 容器 + podman rootless（aiops 已验证） | 容器内的 podman | 镜像内装 podman + fuse-overlayfs + shadow（配置 subuid），软链为 docker；**无需宿主 docker、无需 privileged，自包含** |
+| 容器内 rootful podman（aiops 同款、现网已验证） | 容器内的 podman | 镜像内装 podman，软链为 docker；Pod/容器需 **privileged**（构建时挂载 overlay 存储）；无需宿主 docker socket |
 
-**v1 默认推荐第 3 种**（容器内 podman rootless），与 aiops 现网一致；裸机部署则要求宿主安装 docker/podman。构建层缓存直接用 daemon 的本地层缓存。
+**K8s 容器部署默认采用第 3 种**（rootful podman + privileged，与 aiops 现网一致）；托管集群若禁止 privileged，此路不可用（rootless/vfs 曾尝试但 remount 权限在托管节点不可靠）。裸机部署则直接使用宿主 docker/podman。构建层缓存直接用 daemon 的本地层缓存。
 
 依赖安装方式：容器形态下 git/kubectl/podman 全部打进镜像（自包含，宿主零安装）；裸机形态下 git/kubectl 可随二进制分发（静态链接），docker/podman 因依赖容器运行时栈（crun/runc + conmon + 存储驱动）无法打包进 tarball，须宿主经系统包管理器安装，由 README「前置依赖」清单 + 可选 install 脚本声明。
 

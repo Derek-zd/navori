@@ -100,8 +100,23 @@ export default function RunDetail() {
       .filter((g) => visibleSteps.some((s) => s.name === g.step))
       .flatMap((g) => g.lines.map((line) => `[${g.step}] ${line}`))
       .join('\n')
+    const content = text || '(empty)'
     try {
-      await navigator.clipboard.writeText(text || '(empty)')
+      // navigator.clipboard only works in secure contexts (HTTPS/localhost);
+      // fall back to a hidden textarea + execCommand otherwise.
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(content)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = content
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+        if (!ok) throw new Error('execCommand copy failed')
+      }
       setToast({ type: 'success', text: '日志已复制' })
     } catch {
       setToast({ type: 'error', text: '复制失败，请手动选择' })
