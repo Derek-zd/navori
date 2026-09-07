@@ -16,3 +16,6 @@
 # env
 .env
 .env.local
+
+# local session notes (never commit)
+LOCAL-NOTES.md
