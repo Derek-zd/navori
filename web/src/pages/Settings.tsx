@@ -74,15 +74,16 @@ export default function Settings() {
   }
 
   async function runClean(mode: 'prune' | 'deep') {
-    if (mode === 'deep' && !confirm('深度清理会删除所有未使用的镜像与构建缓存，确认继续？')) return
+    if (mode === 'deep' && !confirm('深度清理会删除所有容器与未使用镜像（含被构建容器占用的中间层），下次构建需重新拉取基础镜像。确认继续？')) return
     setCleaning(mode)
     try {
-      const res = await api<{ usage: DiskUsage[]; output: string }>('/api/system/storage/cleanup', {
+      const res = await api<{ usage: DiskUsage[]; output: string; reclaimed?: string }>('/api/system/storage/cleanup', {
         method: 'POST',
         body: JSON.stringify({ mode }),
       })
       if (storage) setStorage({ ...storage, usage: res.usage, cleanup: { ...storage.cleanup, lastAt: new Date().toISOString(), lastMode: mode } })
-      setToast({ type: 'success', text: mode === 'prune' ? '构建缓存已清理' : '深度清理完成' })
+      const freed = res.reclaimed && res.reclaimed !== '0B' ? '，回收 ' + res.reclaimed : ''
+      setToast({ type: 'success', text: (mode === 'prune' ? '构建缓存已清理' : '深度清理完成') + freed })
     } catch (e) {
       setToast({ type: 'error', text: e instanceof Error ? e.message : '清理失败' })
     } finally {

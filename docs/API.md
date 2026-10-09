@@ -11,6 +11,7 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-08-13 | 初稿 |
+| 2026-09-07 | 新增 §13.1 存储管理（用量/清理/策略）；`POST /api/system/storage/cleanup` 增加 `reclaimed` 字段，deep 语义修正为 `rm -af` + `--external` |
 
 ---
 
@@ -276,4 +277,25 @@ GET /api/audit-logs?limit=&offset= → 200 { data: [AuditLog], total, limit, off
 GET /api/system/info → { data: { version, gitCommit, buildTime } }
 GET /api/system/health → { data: { status: "ok", db: "sqlite" | "mysql" } }  // 无需认证
 GET /api/system/config → { data: { webhookBaseUrl } }  // 供展示 webhook 地址
+
+### 13.1 存储管理（admin）
+
+GET /api/system/storage → 200 { data: { usage: [DiskUsage], cleanup: CleanupPolicy } }
+    DiskUsage    = { path, exists, percent, usedGi, totalGi }
+                   // path: /var/lib/containers（podman 构建缓存）与 /data
+    CleanupPolicy = { frequency: "off"|"daily"|"weekly"|"monthly", threshold, lastAt, lastMode }
+
+POST /api/system/storage/cleanup
+    body { mode: "prune" | "deep" }
+    → 200 { data: { usage: [DiskUsage], output, reclaimed } }   // reclaimed 形如 "3.372GB"
+    → 500 有构建正在运行（running/pending）时拒绝，避免中断构建
+    prune = podman system prune -f（停用容器 + dangling 镜像/缓存，保留 tagged 与基础镜像缓存）
+    deep  = podman rm -af → image prune -af --external → system prune -f --external
+            // --external 才能清掉被残留 build 容器占用的中间层；会清空全部未用镜像，
+            // 下次构建需重新拉取基础镜像
+
+PATCH /api/system/storage
+    body { frequency: "off"|"daily"|"weekly"|"monthly", threshold: 50-99 }
+    → 200 { data: { usage, cleanup } }
+    自动清理：按 frequency 到期先 prune；清理后用量仍 ≥ threshold 时自动升级 deep。
 

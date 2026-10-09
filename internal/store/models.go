@@ -161,7 +161,7 @@ type NotifyChannel struct {
 // cleanup policy).
 type AppConfig struct {
 	ID              uint   `gorm:"primaryKey"`
-	SMTPEnc         string `gorm:"type:text"` // encrypted SMTP config JSON
+	SMTPEnc         string `gorm:"type:text"`             // encrypted SMTP config JSON
 	CleanupFreq     string `gorm:"size:16;default:daily"` // off|daily|weekly|monthly
 	CleanupPercent  int    `gorm:"default:85"`            // deep-clean when usage exceeds this
 	LastCleanupAt   *time.Time

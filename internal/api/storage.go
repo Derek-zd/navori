@@ -7,10 +7,13 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"navori/internal/store"
 )
 
 // storagePaths are the directories whose disk usage we report/clean.
@@ -72,39 +75,112 @@ func highestUsagePercent() float64 {
 	return max
 }
 
-// runPodmanClean runs a podman/docker cleanup command and returns its trimmed output.
-func runPodmanClean(mode string) (string, error) {
-	var args []string
+// cleanupCommands returns the podman command sequence for a cleanup mode.
+//
+// Notes on podman 5.x behaviour (why the previous single commands were not
+// enough):
+//   - `podman builder prune` is just an alias of `podman image prune`, so the
+//     old "prune" mode only removed *dangling* images and never touched the
+//     tagged images produced by every build.
+//   - `image prune -a` skips images still referenced by *build containers*
+//     (buildah working containers left behind by failed/cancelled builds), so
+//     intermediate layers stayed and the PVC filled up. `--external` is the
+//     documented way to also remove images held by those build containers.
+//   - `system prune --external` clears container data in storage that podman
+//     itself no longer tracks (orphans from interrupted builds).
+//
+// prune = safe, keeps tagged/base image cache for fast builds.
+// deep  = reclaim everything (all containers + all unused images incl. those
+//
+//	held by build containers + orphan data); base images are re-pulled
+//	on the next build.
+func cleanupCommands(mode string) [][]string {
 	switch mode {
 	case "prune":
-		args = []string{"builder", "prune", "-f"}
+		return [][]string{
+			{"system", "prune", "-f"},
+		}
 	case "deep":
-		args = []string{"image", "prune", "-af"}
+		return [][]string{
+			{"rm", "-af"},                           // drop leftover build containers (they pin layers)
+			{"image", "prune", "-af", "--external"}, // all unused images, incl. build-held
+			{"system", "prune", "-f", "--external"}, // orphan container data / networks
+		}
 	default:
-		return "", fmt.Errorf("unknown cleanup mode %q", mode)
+		return nil
 	}
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
-// cleanupStorage runs the requested cleanup, records it, and returns new usage.
-func (s *Server) cleanupStorage(mode string) ([]diskUsage, string, error) {
-	output, err := runPodmanClean(mode)
+var reclaimedRe = regexp.MustCompile(`Total reclaimed space:\s*(\S+)`)
+
+// parseReclaimed returns the last "Total reclaimed space: X" value, or "".
+func parseReclaimed(output string) string {
+	m := reclaimedRe.FindAllStringSubmatch(output, -1)
+	if len(m) == 0 {
+		return ""
+	}
+	return m[len(m)-1][1]
+}
+
+// runCleanup executes the command sequence for mode, tolerating individual
+// step failures (deep clean is best-effort: one failing step must not stop the
+// rest). It returns the combined output and an error only when every step
+// failed.
+func runCleanup(mode string) (string, error) {
+	cmds := cleanupCommands(mode)
+	if len(cmds) == 0 {
+		return "", fmt.Errorf("unknown cleanup mode %q", mode)
+	}
+	var sb strings.Builder
+	ok := 0
+	for _, args := range cmds {
+		cmd := exec.Command("docker", args...)
+		out, err := cmd.CombinedOutput()
+		fmt.Fprintf(&sb, "$ docker %s\n", strings.Join(args, " "))
+		if text := strings.TrimSpace(string(out)); text != "" {
+			sb.WriteString(text + "\n")
+		}
+		if err != nil {
+			fmt.Fprintf(&sb, "(step failed: %v)\n", err)
+			continue
+		}
+		ok++
+	}
+	if ok == 0 {
+		return sb.String(), fmt.Errorf("all cleanup steps failed")
+	}
+	return sb.String(), nil
+}
+
+// hasActiveRun reports whether a build is currently running/pending. Cleanup
+// must not run then: `rm -af` would kill an in-progress buildah container.
+func (s *Server) hasActiveRun() bool {
+	var n int64
+	s.DB.DB.Model(&store.Run{}).
+		Where("status IN ?", []string{"running", "pending"}).
+		Count(&n)
+	return n > 0
+}
+
+// cleanupStorage runs the requested cleanup, records it, and returns new usage
+// plus the reclaimed-space string.
+func (s *Server) cleanupStorage(mode string) ([]diskUsage, string, string, error) {
+	if s.hasActiveRun() {
+		return nil, "", "", fmt.Errorf("有构建正在运行，已跳过清理以免中断构建")
+	}
+	output, err := runCleanup(mode)
+	reclaimed := parseReclaimed(output)
 	if err != nil {
-		return nil, output, err
+		return nil, output, reclaimed, err
 	}
 	now := time.Now()
 	cfg := s.getAppConfig()
 	cfg.LastCleanupAt = &now
 	cfg.LastCleanupMode = mode
 	if err := s.DB.DB.Save(cfg).Error; err != nil {
-		return nil, output, err
+		return nil, output, reclaimed, err
 	}
-	return allUsage(), output, nil
+	return allUsage(), output, reclaimed, nil
 }
 
 // getStorageInfo returns current usage + cleanup policy for the UI.
@@ -145,13 +221,13 @@ func (s *Server) cleanStorage(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "mode must be prune or deep")
 		return
 	}
-	usage, output, err := s.cleanupStorage(req.Mode)
+	usage, output, reclaimed, err := s.cleanupStorage(req.Mode)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 		return
 	}
-	s.audit(r, "storage.cleanup."+req.Mode, "")
-	ok(w, map[string]interface{}{"usage": usage, "output": output})
+	s.audit(r, "storage.cleanup."+req.Mode, reclaimed)
+	ok(w, map[string]interface{}{"usage": usage, "output": output, "reclaimed": reclaimed})
 }
 
 func (s *Server) updateStoragePolicy(w http.ResponseWriter, r *http.Request) {
@@ -228,17 +304,24 @@ func (s *Server) StartStorageCleaner(ctx context.Context) {
 				if !s.lastCleanupDue(now) {
 					continue
 				}
+				if s.hasActiveRun() {
+					continue // retry on the next tick once the build finishes
+				}
 				cfg := s.getAppConfig()
 				log.Printf("storage: scheduled prune (frequency=%s)", cfg.CleanupFreq)
-				if _, _, err := s.cleanupStorage("prune"); err != nil {
+				if _, _, reclaimed, err := s.cleanupStorage("prune"); err != nil {
 					log.Printf("storage: scheduled prune failed: %v", err)
 					continue
+				} else {
+					log.Printf("storage: scheduled prune done (reclaimed %s)", reclaimed)
 				}
 				// escalate to deep only when usage is still high
 				if pct := highestUsagePercent(); pct >= float64(cfg.CleanupPercent) {
 					log.Printf("storage: usage %.1f%% still above threshold %d%%, running deep clean", pct, cfg.CleanupPercent)
-					if _, _, err := s.cleanupStorage("deep"); err != nil {
+					if _, _, reclaimed, err := s.cleanupStorage("deep"); err != nil {
 						log.Printf("storage: scheduled deep clean failed: %v", err)
+					} else {
+						log.Printf("storage: scheduled deep clean done (reclaimed %s)", reclaimed)
 					}
 				}
 			}

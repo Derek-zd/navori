@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,49 @@ func TestRound1(t *testing.T) {
 	for _, c := range cases {
 		if got := round1(c.in); got != c.want {
 			t.Errorf("round1(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCleanupCommands(t *testing.T) {
+	// deep must include the --external variants: plain `image prune -a` skips
+	// images pinned by leftover buildah build containers, which is exactly why
+	// the PVC filled up before.
+	deep := cleanupCommands("deep")
+	if len(deep) == 0 {
+		t.Fatal("deep: no commands")
+	}
+	var joined []string
+	for _, c := range deep {
+		joined = append(joined, strings.Join(c, " "))
+	}
+	all := strings.Join(joined, " | ")
+	for _, want := range []string{"rm -af", "image prune -af --external", "system prune -f --external"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("deep missing %q, got: %s", want, all)
+		}
+	}
+
+	prune := cleanupCommands("prune")
+	if len(prune) != 1 || strings.Join(prune[0], " ") != "system prune -f" {
+		t.Errorf("prune = %v, want [[system prune -f]]", prune)
+	}
+
+	if cleanupCommands("bogus") != nil {
+		t.Error("bogus mode should return nil")
+	}
+}
+
+func TestParseReclaimed(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Deleted Images\nTotal reclaimed space: 3.372GB\n", "3.372GB"},
+		{"Total reclaimed space: 0B", "0B"},
+		{"$ docker system prune -f\nTotal reclaimed space: 1.5MB\n$ docker image prune -af --external\nTotal reclaimed space: 700MB\n", "700MB"},
+		{"no marker here", ""},
+	}
+	for _, c := range cases {
+		if got := parseReclaimed(c.in); got != c.want {
+			t.Errorf("parseReclaimed(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

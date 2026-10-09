@@ -277,6 +277,17 @@ Template（可选，后续）
 - 多实例：**v1 明确单实例**。原因：构建执行在容器内（docker/podman + 本地 workspace）是节点本地资源，多副本无法迁移在途构建；要横向扩容需任务队列/选主/run 归属协调，这正是 v2 agent 的职责。MySQL 双存储是「对接已有设施 + 为未来铺路」的卫生措施，不是 v1 扩容手段。
 - 性能瓶颈评估：CI 触发频率（webhook 每分钟个位数）下，数据库（含 SQLite）远非瓶颈；真正瓶颈是构建执行器（docker/podman 并发上限，默认并发 2 可配）。
 
+### 12.1 构建存储与磁盘清理（2026-09-07）
+
+- 空间归属：podman 存储（`graphRoot=/var/lib/containers/storage`）保存基础镜像、构建中间层、构建产物镜像，是唯一持续增长项；`/data` 存仓库 clone 与 run 日志（日志有保留策略自动清理）。生产建议给 `/var/lib/containers` 挂独立 PVC，否则写容器可写层会占满节点磁盘（随 Pod 重建释放）。
+- 增长来源：每次构建产出一个 tagged 镜像（push 后本地那份即无用）+ 构建缓存中间层；**构建失败/取消**会残留 buildah 工作容器，其引用的中间层不会被普通 prune 释放。
+- 清理语义（`internal/api/storage.go`，podman 5.x 实测）：
+  - `prune` = `podman system prune -f`：停用容器 + dangling 镜像/缓存；保留 tagged 与基础镜像缓存，构建快。
+  - `deep` = `podman rm -af` → `podman image prune -af --external` → `podman system prune -f --external`。必须带 `--external`：`image prune -a` 会跳过被 build 容器占用的镜像（实测：旧 deep 清不掉，新 deep 可清空）。注意 `podman builder prune` 只是 `podman image prune` 的别名，不能当构建缓存清理用。
+  - 构建进行中（run running/pending）跳过清理，避免 `rm -af` 中断构建。
+- 触发：管理员手动（设置页「存储管理」，显示 `/var/lib/containers` 与 `/data` 用量、回收空间）+ 定时（AppConfig `cleanup_freq` off/daily/weekly/monthly；到期先 prune，用量仍 ≥ `cleanup_percent`（默认 85）自动升级 deep）。
+- 配置持久化在 `app_configs` 单行表（CleanupFreq/CleanupPercent/LastCleanupAt/LastCleanupMode）。
+
 ## 13. 安全
 
 - 加密：master key（环境变量或首启生成 data/master.key，0600）派生 AES-256-GCM，加密 kubeconfig/registry 密码/git 凭证/secret 变量；API 返回脱敏。
