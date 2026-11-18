@@ -230,8 +230,10 @@ Run = {
 
 status: pending | running | awaiting_approval | success | failed | cancelled | rejected
 
-Step = { name: "pull" | "build" | "push" | "approve" | "deploy", status, startedAt, finishedAt }
+Step = { name: "pull" | "build" | "push" | "approve" | "deploy", status, startedAt, finishedAt,
+         agentId, agentName?, agentSelector, attempt }
     // steps.status: pending | queued | running | success | failed | skipped | cancelled
+    // agentSelector 为空 = 本机执行；agentName 仅在已派发后出现
     // queued = 已派发给执行器，等待 agent 领取
 
 ### 9.1 SSE 日志流

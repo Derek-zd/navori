@@ -84,10 +84,31 @@ K8s 部署（MySQL + Secret 注入密钥）直接用模板：[examples/k8s/navor
 构建镜像时 shell 出 docker/podman。K8s 容器部署采用 **rootful podman + privileged**（与 aiops 同款、已验证）；
 裸机部署则直接使用宿主 docker/podman + git + kubectl。详见 docs/DESIGN.md §4.1。
 
+## 分布式执行（可选）
+
+默认所有步骤在本机执行。需要跨网络构建/部署时，可在「执行器」页登记 agent，并把流水线的
+`execution.buildAgent` / `execution.deployAgent` 设为 label selector（如 `role=build,region=overseas`）。
+pull/build/push 走构建执行器，deploy 走部署执行器，审批始终留在 server。
+
+构建 agent 二进制：
+
+```bash
+go build -o navori-agent ./cmd/agent
+cp examples/navori-agent.env.example navori-agent.env
+# 在「执行器」页创建同名 agent，复制一次性 token 到 AGENT_TOKEN，然后：
+./navori-agent -config navori-agent.env
+```
+
+agent 只主动发起出站 HTTPS（hello/心跳/领任务/传日志/报结果），不监听端口、不访问数据库、
+不写 server 的 DATA_DIR。构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl；
+凭据随任务下发，仅以 0600 临时文件或临时 DOCKER_CONFIG 使用后删除。
+配置项见 [examples/navori-agent.env.example](examples/navori-agent.env.example)，协议见 docs/API.md §十四。
+
 ## 项目结构
 
-    cmd/server/       入口
-    internal/         后端（api/store/engine/tagx/buildx/deploy/notify/...）
+    cmd/server/       服务端入口
+    cmd/agent/        分布式执行 agent 入口
+    internal/         后端（api/store/runner/tagx/buildx/deploy/notify/...）
     web/              React SPA（Vite + Tailwind）
     docs/             方案与契约（API.md 为唯一权威）
 

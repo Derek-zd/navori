@@ -34,6 +34,8 @@ export default function Pipelines() {
   const [deployNamespace, setDeployNamespace] = useState('')
   const [deployKind, setDeployKind] = useState('Deployment')
   const [approval, setApproval] = useState(false)
+  const [buildAgent, setBuildAgent] = useState('')
+  const [deployAgent, setDeployAgent] = useState('')
   const [branches, setBranches] = useState<string[]>(['**'])
   const [group, setGroup] = useState('')
   const [scheduleCron, setScheduleCron] = useState('')
@@ -132,6 +134,8 @@ export default function Pipelines() {
     setDeployNamespace('')
     setDeployKind('Deployment')
     setApproval(false)
+    setBuildAgent('')
+    setDeployAgent('')
     setBranches(['**'])
     setGroup('')
     setScheduleCron('')
@@ -158,6 +162,9 @@ export default function Pipelines() {
     setDeployNamespace(String(d.namespace || ''))
     setDeployKind(String(d.kind || 'Deployment'))
     setApproval(Boolean(d.approval))
+    const ex = (cfg.execution || {}) as Record<string, any>
+    setBuildAgent(String(ex.buildAgent || ''))
+    setDeployAgent(String(ex.deployAgent || ''))
     setBranches((p.branchRules || []).map((r) => r.branch))
     setGroup((p.group || ''))
     setScheduleCron((p.schedule || ''))
@@ -201,6 +208,10 @@ export default function Pipelines() {
           approval,
         }
       }
+      const execution: Record<string, string> = {}
+      if (buildAgent.trim()) execution.buildAgent = buildAgent.trim()
+      if (deployAgent.trim()) execution.deployAgent = deployAgent.trim()
+      if (Object.keys(execution).length > 0) config.execution = execution
       if (editing) {
         await api('/api/pipelines/' + editing.id, {
           method: 'PATCH',
@@ -317,6 +328,11 @@ export default function Pipelines() {
                             {d.namespace ? d.namespace + ' · ' : ''}
                             <span className="font-mono text-slate-600">{d.kind || 'Deployment'}:{d.name}</span>
                           </div>
+                          {(cfg.execution?.buildAgent || cfg.execution?.deployAgent) ? (
+                            <div className="text-slate-400">
+                              执行：{cfg.execution?.buildAgent || '本机'} / {cfg.execution?.deployAgent || '本机'}
+                            </div>
+                          ) : null}
                         </div>
                       ) : '—'}
                     </td>
@@ -436,6 +452,21 @@ export default function Pipelines() {
               <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} />
               部署前审批
             </label>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="mb-2 text-sm font-medium text-slate-600">执行位置（可选，留空 = 本机执行）</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-500">构建执行器 selector</label>
+                <Input value={buildAgent} onChange={(e) => setBuildAgent(e.target.value)} placeholder="如 role=build,region=overseas" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-500">部署执行器 selector</label>
+                <Input value={deployAgent} onChange={(e) => setDeployAgent(e.target.value)} placeholder="如 role=deploy" />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">pull/build/push 使用构建执行器，deploy 使用部署执行器；审批始终在服务端。需先在「执行器」页登记并启动 agent。</p>
           </div>
 
           <div>

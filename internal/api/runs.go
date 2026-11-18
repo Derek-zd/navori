@@ -44,11 +44,22 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runJSON(v store.Run) map[string]interface{} {
 	var steps []store.Step
 	s.DB.DB.Where("run_id = ?", v.ID).Order("step_order").Find(&steps)
+	agentNames := map[uint]string{}
+	var agents []store.Agent
+	s.DB.DB.Find(&agents)
+	for _, a := range agents {
+		agentNames[a.ID] = a.Name
+	}
 	stepOut := make([]map[string]interface{}, 0, len(steps))
 	for _, st := range steps {
-		stepOut = append(stepOut, map[string]interface{}{
+		out := map[string]interface{}{
 			"name": st.Name, "status": st.Status, "startedAt": st.StartedAt, "finishedAt": st.FinishedAt,
-		})
+			"agentId": st.AgentID, "agentSelector": st.AgentSelector, "attempt": st.Attempt,
+		}
+		if name, ok := agentNames[st.AgentID]; ok {
+			out["agentName"] = name
+		}
+		stepOut = append(stepOut, out)
 	}
 	commitShort := v.Commit
 	if len(commitShort) > 7 {

@@ -116,6 +116,10 @@ export interface Step {
   status: string
   startedAt?: string
   finishedAt?: string
+  agentId?: number
+  agentName?: string
+  agentSelector?: string
+  attempt?: number
 }
 
 export interface Run {

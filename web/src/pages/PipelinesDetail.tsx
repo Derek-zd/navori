@@ -63,6 +63,25 @@ export default function PipelinesDetail() {
         title={'流水线 #' + pipeline.id}
         description={repo ? repo.name + ' · ' + (repo.gitUrl || '') : '仓库 #' + pipeline.repoId}
       />
+      {(() => {
+        const cfg = (pipeline.config || {}) as Record<string, any>
+        const ex = (cfg.execution || {}) as Record<string, string>
+        return (
+          <Card className="mb-4 p-4 text-sm">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-slate-600">
+              <div>
+                <span className="mr-2 text-slate-400">构建执行位置</span>
+                <span className="font-mono text-xs">{ex.buildAgent || '本机'}</span>
+              </div>
+              <div>
+                <span className="mr-2 text-slate-400">部署执行位置</span>
+                <span className="font-mono text-xs">{ex.deployAgent || '本机'}</span>
+              </div>
+              <Link to="/agents" className="text-xs text-indigo-600 hover:underline">管理执行器</Link>
+            </div>
+          </Card>
+        )
+      })()}
       <Card>
         {runs.length === 0 ? (
           <EmptyState title="还没有运行记录" description="点击流水线列表中的「运行」触发第一次构建。" />

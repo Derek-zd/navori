@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
+	"navori/internal/agentx"
 	"navori/internal/store"
 )
 
@@ -55,6 +57,15 @@ func (s *Server) createPipeline(w http.ResponseWriter, r *http.Request) {
 	cfg := req.Config
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
+	}
+	var cfgMap map[string]interface{}
+	if err := json.Unmarshal(cfg, &cfgMap); err != nil {
+		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid config")
+		return
+	}
+	if err := validateExecution(cfgMap); err != nil {
+		fail(w, http.StatusBadRequest, "E_VALIDATION", err.Error())
+		return
 	}
 	br := req.BranchRules
 	if len(br) == 0 {
@@ -123,6 +134,15 @@ func (s *Server) updatePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Config) > 0 {
+		var cfgMap map[string]interface{}
+		if err := json.Unmarshal(req.Config, &cfgMap); err != nil {
+			fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid config")
+			return
+		}
+		if err := validateExecution(cfgMap); err != nil {
+			fail(w, http.StatusBadRequest, "E_VALIDATION", err.Error())
+			return
+		}
 		p.ConfigJSON = string(req.Config)
 	}
 	if len(req.BranchRules) > 0 {
@@ -245,4 +265,22 @@ func randomHex(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// validateExecution rejects malformed agent selectors early instead of
+// queueing steps that no agent can ever match.
+func validateExecution(cfg map[string]interface{}) error {
+	rc := parseResolvedConfig(cfg)
+	for name, sel := range map[string]string{
+		"execution.buildAgent":  rc.Execution.BuildAgent,
+		"execution.deployAgent": rc.Execution.DeployAgent,
+	} {
+		if sel == "" {
+			continue
+		}
+		if _, err := agentx.ParseSelector(sel); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
 }

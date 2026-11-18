@@ -156,7 +156,7 @@ export default function RunDetail() {
     }
   }
 
-  const running = run && (run.status === 'running' || run.status === 'pending')
+  const running = run && (run.status === 'running' || run.status === 'pending' || run.status === 'queued')
 
   return (
     <div>
@@ -238,6 +238,8 @@ export default function RunDetail() {
                         {s.name}
                       </button>
                       <Status value={s.status} />
+                      {s.status === 'queued' ? <span className="text-xs text-slate-500">等待执行器…</span> : null}
+                      {s.agentName ? <span className="text-xs text-slate-400">执行器 {s.agentName}</span> : (!s.agentSelector && !isApprove && ['running', 'success', 'failed', 'cancelled', 'rejected'].includes(s.status)) ? <span className="text-xs text-slate-400">本机执行</span> : null}
                       {dur ? <span className="text-xs text-slate-400">{dur}</span> : null}
                       {isAwaiting ? (
                         <span className="ml-auto flex gap-2">

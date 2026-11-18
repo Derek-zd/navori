@@ -112,6 +112,9 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	// refs/heads/<branch> from the resolved branch (webhook refs already carry
 	// the full ref).
 	ref = normalizeRef(ref, branch)
+	if err := validateExecution(config); err != nil {
+		return nil, err
+	}
 
 	now := time.Now()
 	cfgJSON, _ := json.Marshal(config)

@@ -203,3 +203,18 @@ func TestHeartbeatReturnsCancelForRequeuedStep(t *testing.T) {
 		t.Fatalf("cancel list = %v, want [%d]", resp.Cancel, step.ID)
 	}
 }
+
+func TestValidateExecution(t *testing.T) {
+	valid := map[string]interface{}{
+		"execution": map[string]interface{}{"buildAgent": "role=build,region=overseas", "deployAgent": ""},
+	}
+	if err := validateExecution(valid); err != nil {
+		t.Fatalf("valid selector rejected: %v", err)
+	}
+	for _, bad := range []string{"role", "role=", "=build", "role=build,role=deploy", "role=build,,x=y"} {
+		cfg := map[string]interface{}{"execution": map[string]interface{}{"buildAgent": bad}}
+		if err := validateExecution(cfg); err == nil {
+			t.Fatalf("selector %q should be rejected", bad)
+		}
+	}
+}
