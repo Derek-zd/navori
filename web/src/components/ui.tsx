@@ -72,7 +72,7 @@ export function PageHeader({
         <h1 className="text-[22px] font-semibold leading-tight tracking-[-0.015em] text-ink">{title}</h1>
         {description ? <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-muted">{description}</p> : null}
       </div>
-      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      {action ? <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{action}</div> : null}
     </div>
   )
 }
@@ -132,6 +132,98 @@ export function Status({ value }: { value: string }) {
       />
       {s.label}
     </span>
+  )
+}
+
+export function Drawer({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  width = 'max-w-[720px]',
+}: {
+  open: boolean
+  title: string
+  description?: string
+  onClose: () => void
+  children: ReactNode
+  footer?: ReactNode
+  width?: string
+}) {
+  useEffect(() => {
+    if (!open) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/35 animate-[fade-in_160ms_ease-out]" onClick={onClose} />
+      <div className={'absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-surface shadow-overlay animate-[drawer-in_200ms_ease-out] ' + width}>
+        <div className="flex shrink-0 items-start justify-between gap-6 border-b border-line px-6 py-5">
+          <div>
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            {description ? <p className="mt-1 text-xs leading-5 text-muted">{description}</p> : null}
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-faint transition-colors hover:bg-surface-2 hover:text-ink" aria-label="关闭">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">{children}</div>
+        {footer ? <div className="shrink-0 border-t border-line bg-surface px-6 py-4">{footer}</div> : null}
+      </div>
+    </div>
+  )
+}
+
+export function Field({
+  label,
+  hint,
+  children,
+  className = '',
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <label className="mb-1.5 block text-xs font-medium text-muted">{label}</label>
+      {children}
+      {hint ? <p className="mt-1.5 text-[11px] leading-4 text-faint">{hint}</p> : null}
+    </div>
+  )
+}
+
+export function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="border-b border-line pb-7 last:border-0 last:pb-0">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        {description ? <p className="mt-1 text-[11px] leading-4 text-faint">{description}</p> : null}
+      </div>
+      {children}
+    </section>
   )
 }
 

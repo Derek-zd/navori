@@ -73,6 +73,7 @@ export interface PipelineConfig {
   buildArgs?: Record<string, string>
   platform?: string
   deploy?: DeployConfig
+  execution?: { buildAgent?: string; deployAgent?: string }
 }
 
 export interface Variable {
