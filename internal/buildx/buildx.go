@@ -5,9 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+
+	"navori/internal/proc"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -22,7 +23,7 @@ func Build(ctx context.Context, w io.Writer, dir, dockerfile, tag, platform stri
 		cmdArgs = append(cmdArgs, "--build-arg", k+"="+v)
 	}
 	cmdArgs = append(cmdArgs, ".")
-	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
+	cmd := proc.CommandContext(ctx, "docker", cmdArgs...)
 	cmd.Dir = dir
 	if dockerConfig != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+dockerConfig)
@@ -36,7 +37,7 @@ func Build(ctx context.Context, w io.Writer, dir, dockerfile, tag, platform stri
 // used as DOCKER_CONFIG so the push can use credentials stored in a temporary
 // directory instead of the user's global docker credentials.
 func Push(ctx context.Context, w io.Writer, tag, dockerConfig string) error {
-	cmd := exec.CommandContext(ctx, "docker", "push", tag)
+	cmd := proc.CommandContext(ctx, "docker", "push", tag)
 	if dockerConfig != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+dockerConfig)
 	}
@@ -59,7 +60,7 @@ func LoginTo(ctx context.Context, w io.Writer, url, username, password string) (
 		os.RemoveAll(dir)
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "docker", "login", url, "-u", username, "--password-stdin")
+	cmd := proc.CommandContext(ctx, "docker", "login", url, "-u", username, "--password-stdin")
 	cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+dir)
 	cmd.Stdin = strings.NewReader(password)
 	cmd.Stdout = w

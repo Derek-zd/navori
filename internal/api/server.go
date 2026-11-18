@@ -33,6 +33,9 @@ type Server struct {
 
 	approveMu    sync.Mutex
 	approveChans map[uint]chan string
+
+	stepMu    sync.Mutex
+	stepWaits map[uint]chan stepResult
 }
 
 // Handler assembles the chi router.
@@ -53,6 +56,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/api/agent/hello", s.agentHello)
 		r.Post("/api/agent/heartbeat", s.agentHeartbeat)
 		r.Post("/api/agent/jobs/claim", s.agentClaim)
+		r.Post("/api/agent/jobs/{id}/log", s.agentJobLog)
+		r.Post("/api/agent/jobs/{id}/result", s.agentJobResult)
 	})
 
 	// authenticated

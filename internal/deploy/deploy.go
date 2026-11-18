@@ -3,9 +3,10 @@ package deploy
 import (
 	"context"
 	"io"
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"navori/internal/proc"
 )
 
 // Target describes a K8s workload to update.
@@ -36,7 +37,7 @@ func Replicas(ctx context.Context, w io.Writer, t Target) (int, error) {
 	if t.Namespace != "" {
 		args = append(args, "-n", t.Namespace)
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", buildArgs(t.Kubeconfig, args...)...)
+	cmd := proc.CommandContext(ctx, "kubectl", buildArgs(t.Kubeconfig, args...)...)
 	cmd.Stderr = w // stdout captured via Output for the replica count
 	out, err := cmd.Output()
 	if err != nil {
@@ -92,7 +93,7 @@ func CheckKubeconfig(ctx context.Context, w io.Writer, kubeconfig string) error 
 }
 
 func run(ctx context.Context, w io.Writer, kubeconfig string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", buildArgs(kubeconfig, args...)...)
+	cmd := proc.CommandContext(ctx, "kubectl", buildArgs(kubeconfig, args...)...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()

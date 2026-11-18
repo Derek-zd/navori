@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,6 +45,10 @@ type client struct {
 	maxStep   time.Duration
 	labels    map[string]string
 	hostname  string
+
+	mu      sync.Mutex
+	running map[uint]runningJob
+	wg      sync.WaitGroup
 }
 
 func main() {
@@ -155,6 +160,7 @@ func newClient(cfg agentConfig) *client {
 		maxStep:   agentx.DefaultMaxStepSeconds * time.Second,
 		labels:    labels,
 		hostname:  cfg.Hostname,
+		running:   make(map[uint]runningJob),
 	}
 }
 
@@ -162,16 +168,27 @@ func (c *client) run(ctx context.Context) error {
 	if err := c.connect(ctx); err != nil {
 		return err
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	errCh := make(chan error, 2)
-	go func() { errCh <- c.heartbeatLoop(ctx) }()
-	go func() { errCh <- c.claimLoop(ctx) }()
+	go func() { errCh <- c.heartbeatLoop(runCtx) }()
+	go func() { errCh <- c.claimLoop(runCtx) }()
 
+	var err error
 	select {
 	case <-ctx.Done():
-		return nil
-	case err := <-errCh:
-		return err
+	case err = <-errCh:
+		log.Printf("agent loop stopped: %v", err)
 	}
+	cancel()
+	done := make(chan struct{})
+	go func() { c.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		log.Printf("timed out waiting for running steps to stop")
+	}
+	return err
 }
 
 // connect performs hello with exponential backoff. Authentication and protocol
@@ -242,7 +259,7 @@ func (c *client) heartbeatLoop(ctx context.Context) error {
 		case <-t.C:
 			status, data, err := c.post(ctx, "/api/agent/heartbeat", agentx.HeartbeatReq{
 				Version: agentVersion,
-				Running: []agentx.RunningStep{},
+				Running: c.runningSteps(),
 			})
 			if err != nil {
 				if ctx.Err() != nil {
@@ -265,19 +282,26 @@ func (c *client) heartbeatLoop(ctx context.Context) error {
 				continue
 			}
 			for _, id := range resp.Cancel {
-				log.Printf("cancel requested for step %d", id)
+				c.cancelRunning(id)
 			}
 		}
 	}
 }
 
-// claimLoop polls for work. The P1 server always answers 204; the loop is here
-// so the reconnect/backoff behaviour is exercised from day one.
+// claimLoop keeps up to AGENT_CONCURRENCY jobs in flight and long-polls for
+// more work. The server holds a claim for up to 25s and answers 204 on timeout.
 func (c *client) claimLoop(ctx context.Context) error {
 	backoff := time.Second
+	sem := make(chan struct{}, c.cfg.Concurrency)
 	for {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil
+		}
 		status, data, err := c.post(ctx, "/api/agent/jobs/claim", struct{}{})
 		if err != nil {
+			<-sem
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -294,21 +318,26 @@ func (c *client) claimLoop(ctx context.Context) error {
 		backoff = time.Second
 		switch status {
 		case http.StatusNoContent:
+			<-sem
 			if !sleep(ctx, 500*time.Millisecond) {
 				return nil
 			}
 		case http.StatusOK:
 			var job agentx.Job
 			if err := json.Unmarshal(data, &job); err != nil {
+				<-sem
 				log.Printf("decode job: %v", err)
 				continue
 			}
-			log.Printf("received job %d (%s), but this build has no executor yet", job.JobID, job.StepName)
-			c.reportResult(ctx, job.JobID, agentx.ResultReq{
-				Status: "failed",
-				Error:  "agent build has no executor yet",
-			})
+			log.Printf("received job %d (%s) run %d", job.JobID, job.StepName, job.RunID)
+			c.wg.Add(1)
+			go func() {
+				defer c.wg.Done()
+				defer func() { <-sem }()
+				c.executeJob(ctx, job)
+			}()
 		default:
+			<-sem
 			err := statusError(status, data)
 			if permanent(err) {
 				return err

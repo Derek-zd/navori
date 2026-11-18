@@ -32,6 +32,11 @@ type deployConfig struct {
 	Approvers []string
 }
 
+type executionConfig struct {
+	BuildAgent  string `json:"buildAgent"`
+	DeployAgent string `json:"deployAgent"`
+}
+
 // resolvedConfig is the effective pipeline config after branch-rule resolution.
 type resolvedConfig struct {
 	DockerfilePath string
@@ -43,6 +48,7 @@ type resolvedConfig struct {
 	RegistryID     uint
 	Variables      map[string]string
 	Deploy         deployConfig
+	Execution      executionConfig
 }
 
 func parseResolvedConfig(cfg map[string]interface{}) resolvedConfig {
@@ -102,7 +108,7 @@ func (s *Server) executeRun(run *store.Run, repo *store.Repository, branch strin
 			terminal := "failed"
 			if errors.Is(err, errRejected) {
 				terminal = "rejected"
-			} else if ctx.Err() != nil {
+			} else if ctx.Err() != nil || errors.Is(err, errStepCancelled) {
 				terminal = "cancelled"
 			}
 			for j := i + 1; j < len(steps); j++ {
@@ -123,7 +129,10 @@ func (s *Server) failRun(run *store.Run, steps []store.Step, msg string) {
 }
 
 func (s *Server) executeStep(ctx context.Context, run *store.Run, repo *store.Repository, branch string, config map[string]interface{}, imageTag string, step *store.Step) error {
-	s.DB.DB.Model(step).Updates(map[string]interface{}{"status": "running", "started_at": nowPtr()})
+	remote := step.AgentSelector != ""
+	if !remote {
+		s.DB.DB.Model(step).Updates(map[string]interface{}{"status": "running", "started_at": nowPtr()})
+	}
 
 	logDir := s.runLogDir(run.ID)
 	_ = os.MkdirAll(logDir, 0o755)
@@ -137,32 +146,47 @@ func (s *Server) executeStep(ctx context.Context, run *store.Run, repo *store.Re
 	}
 	defer f.Close()
 
-	rc := parseResolvedConfig(config)
 	var stepErr error
-	switch step.Name {
-	case "pull":
-		stepErr = s.stepPull(ctx, f, repo, branch)
-	case "build":
-		stepErr = s.stepBuild(ctx, f, repo, rc, imageTag)
-	case "push":
-		stepErr = s.stepPush(ctx, f, rc, imageTag)
-	case "approve":
-		stepErr = s.stepApprove(ctx, f, run, step)
-	case "deploy":
-		stepErr = s.stepDeploy(ctx, f, rc, imageTag)
-	default:
-		stepErr = fmt.Errorf("unknown step %s", step.Name)
+	if remote {
+		stepErr = s.dispatchStep(ctx, step)
+	} else {
+		rc := parseResolvedConfig(config)
+		switch step.Name {
+		case "pull":
+			stepErr = s.stepPull(ctx, f, repo, branch)
+		case "build":
+			stepErr = s.stepBuild(ctx, f, repo, rc, imageTag)
+		case "push":
+			stepErr = s.stepPush(ctx, f, rc, imageTag)
+		case "approve":
+			stepErr = s.stepApprove(ctx, f, run, step)
+		case "deploy":
+			stepErr = s.stepDeploy(ctx, f, rc, imageTag)
+		default:
+			stepErr = fmt.Errorf("unknown step %s", step.Name)
+		}
 	}
 
+	status := "success"
 	if stepErr != nil {
-		s.DB.DB.Model(step).Updates(map[string]interface{}{"status": "failed", "finished_at": nowPtr()})
-		if !errors.Is(stepErr, errRejected) {
+		status = "failed"
+		if errors.Is(stepErr, errStepCancelled) || ctx.Err() != nil {
+			status = "cancelled"
+		}
+	}
+	// Only move a step that is still active: the result handler may already
+	// have recorded the agent's terminal state.
+	s.DB.DB.Model(&store.Step{}).
+		Where("id = ? AND status IN ?", step.ID, []string{"pending", "queued", "running", "awaiting_approval"}).
+		Updates(map[string]interface{}{"status": status, "finished_at": nowPtr()})
+
+	if stepErr != nil {
+		if status == "failed" {
 			s.DB.DB.Model(run).Updates(map[string]interface{}{"error": stepErr.Error()})
 		}
-		log.Printf("run %d step %s failed: %v", run.ID, step.Name, stepErr)
+		log.Printf("run %d step %s %s: %v", run.ID, step.Name, status, stepErr)
 		return stepErr
 	}
-	s.DB.DB.Model(step).Updates(map[string]interface{}{"status": "success", "finished_at": nowPtr()})
 	return nil
 }
 
@@ -383,6 +407,11 @@ func (s *Server) sendWithRetry(ev notify.Event, fn func() error) {
 func (s *Server) resolveImageTag(run *store.Run, repo *store.Repository, branch string, config map[string]interface{}) (string, error) {
 	if run.Commit == "" {
 		commit, err := gitx.HeadCommit(s.repoDir(repo.ID))
+		if err != nil {
+			// The server may not have a local clone when pull runs on an
+			// agent; ask the remote for the branch head instead.
+			commit, err = gitx.RemoteBranchHead(s.cloneURL(repo), branch)
+		}
 		if err != nil {
 			return "", fmt.Errorf("resolve commit: %w", err)
 		}

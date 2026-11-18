@@ -137,7 +137,14 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 		stepNames = append(stepNames, "deploy")
 	}
 	for i, name := range stepNames {
-		step := store.Step{RunID: run.ID, StepOrder: i + 1, Name: name, Status: "pending"}
+		selector := ""
+		switch name {
+		case "pull", "build", "push":
+			selector = rc.Execution.BuildAgent
+		case "deploy":
+			selector = rc.Execution.DeployAgent
+		}
+		step := store.Step{RunID: run.ID, StepOrder: i + 1, Name: name, Status: "pending", AgentSelector: selector}
 		if err := s.DB.DB.Create(&step).Error; err != nil {
 			return nil, err
 		}

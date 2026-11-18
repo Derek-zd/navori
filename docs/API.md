@@ -12,7 +12,7 @@
 |---|---|
 | 2026-08-13 | 初稿 |
 | 2026-09-07 | 新增 §13.1 存储管理（用量/清理/策略）；`POST /api/system/storage/cleanup` 增加 `reclaimed` 字段，deep 语义修正为 `rm -af` + `--external` |
-| 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
+| 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端；P3：claim/日志/结果/租约/取消）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
 
 ---
 
@@ -192,6 +192,10 @@ PipelineConfig（defaults）= {
     targetId, kind: "Deployment" | "StatefulSet", name, namespace,
     containers: { "容器名": "镜像名或空(用刚构建)" },
     approval: bool, approvers: [username]   // 空 = 任意 admin
+  },
+  execution: {                             // v2 分布式执行；空 = 本机执行
+    buildAgent: "role=build,region=overseas",  // pull/build/push 的 selector
+    deployAgent: "role=deploy"                 // deploy 的 selector；approve 永远本机
   }
 }
 
@@ -355,8 +359,39 @@ POST /api/agent/heartbeat
     body: { version, running?: [{ stepId, runId, startedAt }], disk?: { workspaceBytes, imagesBytes } }
     → 200 { ok: true, cancel: [stepId...] }
     刷新 lastSeenAt，并续租该 agent 名下所有 running 步骤（lease = 120s）。
+    cancel 是服务端要求终止的 stepId：步骤已取消/失败，或已被重新派给其他 agent。
 
 POST /api/agent/jobs/claim
     → 200 { job } | 204
-    长轮询领取步骤（服务端最多 hold 25s）；204 = 暂无任务，agent 立即重试。
-    骨架阶段（P1）尚未派发，固定返回 204。
+    长轮询领取步骤（服务端最多 hold 25s，每 500ms 扫一次）；204 = 暂无任务。
+    只返回 status=queued 且 agentSelector 与本 agent labels 匹配的步骤；
+    抢占使用条件 UPDATE，并发 claim 只有一个成功。payload 中的凭据已解密。
+
+Job = {
+  jobId, runId, stepOrder, stepName,     // jobId == steps.id
+  leaseSeconds: 120, deadline, imageTag,
+  params: PullParams | BuildParams | PushParams | DeployParams
+}
+PullParams   = { gitUrl, branch, dir }                 // dir 相对 AGENT_WORKDIR
+BuildParams  = { dir, dockerfile, context, args, platform }
+PushParams   = { image, registryUrl, username, password, insecureSkipTls }
+DeployParams = { kubeconfig(base64), kind, name, namespace, container, image,
+                 timeoutSeconds }                       // kubeconfig 解码后 <100KB
+
+POST /api/agent/jobs/{id}/log
+    body: { seq, lines: [string] }
+    → 200 { ok: true } | { ok: true, ignored: true } | { ok: true, truncated: true }
+    追加写入该步骤日志（O_APPEND），SSE 日志流无需变更；每行超过 8KB 截断，
+    单步日志上限 20MB，超过后返回 truncated 并丢弃。请求同时续租 120s。
+    404 = 步骤不存在或不属于该 agent；终态步骤返回 ignored（幂等）。
+
+POST /api/agent/jobs/{id}/result
+    body: { status: "success" | "failed" | "cancelled", exitCode?, error? }
+    → 200 { ok: true } | { ok: true, ignored: true }
+    仅允许把 queued/running 且属于该 agent 的步骤改为终态；已终态返回 ignored，
+    重复上报不会覆盖结果（幂等）。failed 的 error 会写入 run.error 并唤醒引擎。
+
+租约与重试：心跳/日志续租 120s；janitor 每 15s 检查过期 running 步骤，
+attempt+1 后重新置 queued（最多重试 2 次），仍失联则 failed 并唤醒引擎。
+迟到的日志/结果按终态幂等规则忽略。server 取消 run 时步骤置 cancelled，
+下一次心跳把 cancel 下发给 agent，agent 终止进程组。
