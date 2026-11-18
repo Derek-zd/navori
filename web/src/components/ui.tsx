@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { X } from 'lucide-react'
 
 export function Button({
@@ -29,6 +29,17 @@ export function Button({
 export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
+      className={
+        'w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 ' + className
+      }
+      {...props}
+    />
+  )
+}
+
+export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
       className={
         'w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 ' + className
       }
@@ -135,6 +146,9 @@ export function Status({ value }: { value: string }) {
   )
 }
 
+let drawerSeq = 0
+const drawerStack: number[] = []
+
 export function Drawer({
   open,
   title,
@@ -152,31 +166,43 @@ export function Drawer({
   footer?: ReactNode
   width?: string
 }) {
+  const idRef = useRef(0)
+  if (idRef.current === 0) idRef.current = ++drawerSeq
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
+    const id = idRef.current
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    drawerStack.push(id)
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      // Only the topmost drawer should react to Escape.
+      if (e.key === 'Escape' && drawerStack[drawerStack.length - 1] === id) {
+        onCloseRef.current()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => {
+      const i = drawerStack.lastIndexOf(id)
+      if (i >= 0) drawerStack.splice(i, 1)
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/35 animate-[fade-in_160ms_ease-out]" onClick={onClose} />
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="absolute inset-0 bg-black/35 animate-[fade-in_160ms_ease-out]" onClick={() => onCloseRef.current()} />
       <div className={'absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-surface shadow-overlay animate-[drawer-in_200ms_ease-out] ' + width}>
         <div className="flex shrink-0 items-start justify-between gap-6 border-b border-line px-6 py-5">
           <div>
             <h2 className="text-base font-semibold text-ink">{title}</h2>
             {description ? <p className="mt-1 text-xs leading-5 text-muted">{description}</p> : null}
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-faint transition-colors hover:bg-surface-2 hover:text-ink" aria-label="关闭">
+          <button onClick={() => onCloseRef.current()} className="rounded-md p-1 text-faint transition-colors hover:bg-surface-2 hover:text-ink" aria-label="关闭">
             <X size={18} />
           </button>
         </div>
@@ -299,7 +325,7 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+    <div className="flex flex-col items-center justify-center px-6 py-10 text-center sm:py-16">
       {icon ? <div className="mb-4 text-faint">{icon}</div> : null}
       <h3 className="text-sm font-semibold text-ink">{title}</h3>
       {description ? <p className="mt-1 max-w-sm text-sm text-muted">{description}</p> : null}

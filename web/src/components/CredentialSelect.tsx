@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, KeyRound, Plus } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Credential } from '../lib/types'
-import { Button, Input, Modal, Toast, useToast } from './ui'
+import { Button, Drawer, Field, Input, Select, Toast, useToast } from './ui'
+
+const TYPE_LABELS: Record<string, string> = {
+  https: 'Git HTTPS',
+  ssh: 'Git SSH',
+  registry: '镜像仓库',
+}
 
 export function CredentialSelect({
   value,
@@ -11,6 +17,7 @@ export function CredentialSelect({
   onCreated,
   filter,
   allowedTypes,
+  emptyLabel = '不使用凭证（公开仓库）',
 }: {
   value: number
   onChange: (id: number) => void
@@ -18,10 +25,11 @@ export function CredentialSelect({
   onCreated?: (cred: Credential) => void
   filter: (c: Credential) => boolean
   allowedTypes?: string[]
+  emptyLabel?: string
 }) {
   const { toast, setToast } = useToast()
   const [open, setOpen] = useState(false)
-  const [showModal, setShowModal] = useState(false)
+  const [showDrawer, setShowDrawer] = useState(false)
   const [name, setName] = useState('')
   const [type, setType] = useState((allowedTypes && allowedTypes[0]) || 'https')
   const [username, setUsername] = useState('')
@@ -53,7 +61,7 @@ export function CredentialSelect({
   function openNew() {
     reset()
     setOpen(false)
-    setShowModal(true)
+    setShowDrawer(true)
   }
 
   async function create() {
@@ -65,7 +73,7 @@ export function CredentialSelect({
       })
       onCreated?.(cred)
       onChange(cred.id)
-      setShowModal(false)
+      setShowDrawer(false)
       setToast({ type: 'success', text: '凭证已添加' })
     } catch (e) {
       setToast({ type: 'error', text: e instanceof Error ? e.message : '添加失败' })
@@ -74,7 +82,7 @@ export function CredentialSelect({
     }
   }
 
-  const label = current ? current.name + '（' + current.type + '）' : '不使用凭证（公开）'
+  const label = current ? current.name + '（' + (TYPE_LABELS[current.type] || current.type) + '）' : emptyLabel
 
   return (
     <>
@@ -82,19 +90,22 @@ export function CredentialSelect({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          className="flex w-full items-center justify-between rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink transition-colors hover:border-line-strong focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
         >
-          <span className={current ? 'text-slate-700' : 'text-slate-400'}>{label}</span>
-          <ChevronDown size={15} className="text-slate-400" />
+          <span className="flex min-w-0 items-center gap-2">
+            <KeyRound size={14} className="shrink-0 text-faint" />
+            <span className={current ? 'truncate' : 'truncate text-faint'}>{label}</span>
+          </span>
+          <ChevronDown size={15} className="shrink-0 text-faint" />
         </button>
         {open ? (
-          <div className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+          <div className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-md border border-line bg-surface py-1 shadow-overlay">
             <button
               type="button"
               onClick={() => { onChange(0); setOpen(false) }}
-              className={'flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ' + (value === 0 ? 'text-indigo-600' : 'text-slate-700')}
+              className={'flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-surface-2 ' + (value === 0 ? 'text-brand' : 'text-ink')}
             >
-              不使用凭证（公开）
+              {emptyLabel}
               {value === 0 ? <Check size={15} /> : null}
             </button>
             {creds.map((c) => (
@@ -102,58 +113,62 @@ export function CredentialSelect({
                 key={c.id}
                 type="button"
                 onClick={() => { onChange(c.id); setOpen(false) }}
-                className={'flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ' + (value === c.id ? 'text-indigo-600' : 'text-slate-700')}
+                className={'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-2 ' + (value === c.id ? 'text-brand' : 'text-ink')}
               >
-                {c.name}（{c.type}）
-                {value === c.id ? <Check size={15} /> : null}
+                <span className="min-w-0 truncate">
+                  {c.name}
+                  <span className="ml-1.5 text-[10px] text-faint">{TYPE_LABELS[c.type] || c.type}</span>
+                </span>
+                {value === c.id ? <Check size={15} className="shrink-0" /> : null}
               </button>
             ))}
-            <div className="my-1 border-t border-slate-100" />
+            <div className="my-1 border-t border-line" />
             <button
               type="button"
               onClick={openNew}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-brand transition-colors hover:bg-brand/5"
             >
-              ＋ 新建凭证…
+              <Plus size={14} />
+              新建凭证…
             </button>
           </div>
         ) : null}
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="新建凭证">
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">名称</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 github-token" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">类型</label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              {types.map((t) => (
-                <option key={t} value={t}>{t === 'https' ? 'Git HTTPS' : t === 'ssh' ? 'Git SSH' : '镜像仓库'}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">用户名</label>
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="可选" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">Secret / 密码 / 私钥</label>
-            <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Token、密码或私钥内容" />
-          </div>
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <Button variant="secondary" onClick={() => setShowModal(false)}>取消</Button>
-            <Button onClick={create} disabled={busy || !name || !secret}>
-              {busy ? '添加中…' : '添加'}
+      <Drawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        title="新建凭证"
+        description="凭证加密保存，创建后 API 不会回显密码或私钥。"
+        width="max-w-[520px]"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowDrawer(false)}>取消</Button>
+            <Button onClick={create} disabled={busy || !name.trim() || !secret}>
+              {busy ? '添加中…' : '添加凭证'}
             </Button>
           </div>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="名称" hint="用于在流水线和资源里辨认，例如 github-token。">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 github-token" />
+          </Field>
+          <Field label="类型">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              {types.map((t) => (
+                <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="用户名" hint="可选；Git SSH 可留空，镜像仓库通常填账号。">
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="可选" />
+          </Field>
+          <Field label="Secret / 密码 / 私钥" hint="加密写入数据库，之后只显示是否已设置。">
+            <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Token、密码或私钥内容" />
+          </Field>
         </div>
-      </Modal>
+      </Drawer>
       <Toast toast={toast} />
     </>
   )

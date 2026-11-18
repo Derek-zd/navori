@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Pencil, Plus, Plug, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Boxes, KeyRound, Pencil, Plug, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Credential, Registry } from '../lib/types'
-import { Button, Card, EmptyState, Input, Modal, PageHeader, Select, Toast, useToast } from '../components/ui'
+import { Button, Card, Drawer, EmptyState, Field, FormSection, Input, PageHeader, Select, Toast, useToast } from '../components/ui'
 import { CredentialSelect } from '../components/CredentialSelect'
 
 type TestStatus = 'success' | 'error'
@@ -10,7 +10,7 @@ type TestStatus = 'success' | 'error'
 export default function Registries() {
   const [regs, setRegs] = useState<Registry[]>([])
   const [creds, setCreds] = useState<Credential[]>([])
-  const [showModal, setShowModal] = useState(false)
+  const [showDrawer, setShowDrawer] = useState(false)
   const [editing, setEditing] = useState<Registry | null>(null)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -19,9 +19,21 @@ export default function Registries() {
   const [password, setPassword] = useState('')
   const [credentialId, setCredentialId] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [testingId, setTestingId] = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, TestStatus>>({})
   const [modalTest, setModalTest] = useState<{ state: 'idle' | 'testing' | 'success' | 'error'; message?: string }>({ state: 'idle' })
+  const [query, setQuery] = useState('')
   const { toast, setToast } = useToast()
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return regs
+    return regs.filter((r) => r.name.toLowerCase().includes(q) || r.url.toLowerCase().includes(q) || r.namespace.toLowerCase().includes(q))
+  }, [regs, query])
+
+  const authenticated = regs.filter((r) => r.credentialId || r.username).length
+  const healthy = Object.values(testResults).filter((s) => s === 'success').length
 
   async function load() {
     const [rs, cs] = await Promise.all([
@@ -38,6 +50,16 @@ export default function Registries() {
     }
     setTestResults(initial)
   }
+
+  async function refresh() {
+    setRefreshing(true)
+    try {
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   useEffect(() => {
     load().catch(() => {})
   }, [])
@@ -55,7 +77,7 @@ export default function Registries() {
   function openCreate() {
     resetForm()
     setEditing(null)
-    setShowModal(true)
+    setShowDrawer(true)
   }
 
   function openEdit(r: Registry) {
@@ -67,7 +89,7 @@ export default function Registries() {
     setPassword('')
     setCredentialId(r.credentialId || 0)
     setModalTest({ state: 'idle' })
-    setShowModal(true)
+    setShowDrawer(true)
   }
 
   function handleCredentialCreated(c: Credential) {
@@ -95,7 +117,7 @@ export default function Registries() {
         })
         setToast({ type: 'success', text: '镜像仓库已添加' })
       }
-      setShowModal(false)
+      setShowDrawer(false)
       await load()
     } catch (e) {
       setToast({ type: 'error', text: e instanceof Error ? e.message : '保存失败' })
@@ -104,10 +126,10 @@ export default function Registries() {
     }
   }
 
-  async function remove(id: number) {
-    if (!confirm('确认删除该镜像仓库？')) return
+  async function remove(r: Registry) {
+    if (!confirm('确认删除镜像仓库「' + r.name + '」？')) return
     try {
-      await api('/api/registries/' + id, { method: 'DELETE' })
+      await api('/api/registries/' + r.id, { method: 'DELETE' })
       setToast({ type: 'success', text: '已删除' })
       await load()
     } catch (e) {
@@ -115,14 +137,17 @@ export default function Registries() {
     }
   }
 
-  async function testSaved(id: number) {
+  async function testSaved(r: Registry) {
+    setTestingId(r.id)
     try {
-      await api('/api/registries/' + id + '/test', { method: 'POST' })
-      setTestResults((prev) => ({ ...prev, [id]: 'success' }))
+      await api('/api/registries/' + r.id + '/test', { method: 'POST' })
+      setTestResults((prev) => ({ ...prev, [r.id]: 'success' }))
       setToast({ type: 'success', text: '连通正常' })
     } catch (e) {
-      setTestResults((prev) => ({ ...prev, [id]: 'error' }))
+      setTestResults((prev) => ({ ...prev, [r.id]: 'error' }))
       setToast({ type: 'error', text: e instanceof Error ? e.message : '连接失败' })
+    } finally {
+      setTestingId(null)
     }
   }
 
@@ -140,141 +165,249 @@ export default function Registries() {
   }
 
   const credName = (id?: number) => creds.find((c) => c.id === id)?.name || (id ? '#' + id : '')
-  const registryCreds = creds.filter((c) => c.type === 'registry')
-  const testBadge = (id: number) => {
+  const testLabel = (id: number) => {
     const s = testResults[id]
-    if (s === 'success') return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />正常</span>
-    if (s === 'error') return <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" />失败</span>
-    return <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-400" />未测</span>
+    if (s === 'success') return <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-ink"><span className="h-1.5 w-1.5 rounded-full bg-success" />正常</span>
+    if (s === 'error') return <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-danger"><span className="h-1.5 w-1.5 rounded-full bg-danger" />失败</span>
+    return <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted"><span className="h-1.5 w-1.5 rounded-full border border-faint" />未测</span>
   }
 
   return (
     <div>
       <PageHeader
+        eyebrow="资源"
         title="镜像仓库"
-        description="构建产物推送的目标 registry"
+        description="构建产物推送的目标 registry；推送时使用临时 DOCKER_CONFIG，不写入全局登录态。"
         action={
-          <Button onClick={openCreate}>
-            <Plus size={16} />
-            添加镜像仓库
-          </Button>
+          <>
+            <Button variant="secondary" onClick={refresh} disabled={refreshing}>
+              <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+              刷新
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus size={15} />
+              添加镜像仓库
+            </Button>
+          </>
         }
       />
-      <Card>
+
+      <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line md:grid-cols-4">
+        {[
+          { label: '仓库总数', value: regs.length, note: '可推送目标' },
+          { label: '已配置认证', value: authenticated, note: '凭证或用户名' },
+          { label: '连接正常', value: healthy, note: '本次会话测试通过' },
+          { label: '命名空间', value: new Set(regs.map((r) => r.namespace).filter(Boolean)).size, note: '不同 namespace' },
+        ].map((s) => (
+          <div key={s.label} className="bg-surface px-4 py-3.5 sm:px-5">
+            <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-faint">{s.label}</div>
+            <div className="mt-1.5 flex items-baseline gap-1.5">
+              <span className="text-xl font-semibold tabular text-ink">{s.value}</span>
+              <span className="hidden text-[10px] text-faint sm:inline">{s.note}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Card className="overflow-hidden">
         {regs.length === 0 ? (
           <EmptyState
+            icon={<Boxes size={32} />}
             title="还没有镜像仓库"
             description="添加构建产物要推送的 registry，流水线构建成功后会自动推送。"
-            action={<Button onClick={openCreate}><Plus size={16} />添加镜像仓库</Button>}
+            action={<Button onClick={openCreate}><Plus size={15} />添加镜像仓库</Button>}
           />
         ) : (
-          <div className="w-full overflow-x-auto">
-<table className="w-full min-w-[680px] text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
-                <th className="px-4 py-3">名称</th>
-                <th className="px-4 py-3">地址</th>
-                <th className="px-4 py-3">命名空间</th>
-                <th className="px-4 py-3">认证</th>
-                <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {regs.map((r) => (
-                <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                  <td className="px-4 py-3 font-medium text-slate-900">{r.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-600">{r.url}</td>
-                  <td className="px-4 py-3 text-slate-600">{r.namespace || '—'}</td>
-                  <td className="px-4 py-3 text-slate-500">{r.credentialId ? credName(r.credentialId) : (r.username ? r.username : '匿名')}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">{testBadge(r.id)}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1.5">
-                      <Button variant="ghost" onClick={() => testSaved(r.id)}>
-                        <Plug size={15} />
-                        测试
-                      </Button>
-                      <Button variant="ghost" onClick={() => openEdit(r)}>
-                        <Pencil size={15} />
-                      </Button>
-                      <Button variant="ghost" onClick={() => remove(r.id)} className="text-red-600 hover:bg-red-50">
-                        <Trash2 size={15} />
-                      </Button>
+          <>
+            <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+              <div className="relative min-w-0 flex-1 sm:max-w-xs">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索名称 / 地址 / 命名空间…" className="!py-1.5 pl-8 text-xs" />
+              </div>
+              <span className="text-[10px] text-faint">{filtered.length} / {regs.length} 个仓库</span>
+            </div>
+
+            {filtered.length === 0 ? (
+              <EmptyState title="没有匹配的镜像仓库" description="换个关键词试试。" />
+            ) : (
+              <>
+                <div className="hidden w-full overflow-x-auto md:block">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-left text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
+                        <th className="px-5 py-3 font-medium">仓库</th>
+                        <th className="px-5 py-3 font-medium">命名空间</th>
+                        <th className="px-5 py-3 font-medium">认证</th>
+                        <th className="px-5 py-3 font-medium">连接</th>
+                        <th className="px-5 py-3 text-right font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((r) => (
+                        <tr key={r.id} className="border-b border-line/70 last:border-0 hover:bg-surface-2/60">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-3">
+                              <span className="flex h-8 w-8 items-center justify-center rounded-md border border-line bg-surface-2 text-muted">
+                                <Boxes size={14} />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate text-xs font-medium text-ink">{r.name}</span>
+                                  {r.isDefault ? <span className="rounded border border-copper/30 bg-copper/10 px-1 py-0.5 text-[9px] text-copper">默认</span> : null}
+                                </div>
+                                <div className="mt-0.5 max-w-[300px] truncate font-mono text-[10px] text-faint">{r.url}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 font-mono text-[11px] text-muted">{r.namespace || '—'}</td>
+                          <td className="px-5 py-3">
+                            {r.credentialId ? (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] text-ink">
+                                <KeyRound size={12} className="text-faint" />
+                                {credName(r.credentialId)}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-muted">{r.username || '匿名'}</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3">{testLabel(r.id)}</td>
+                          <td className="px-5 py-3">
+                            <div className="flex justify-end gap-0.5">
+                              <Button variant="ghost" size="sm" onClick={() => testSaved(r)} disabled={testingId === r.id}>
+                                <Plug size={14} className={testingId === r.id ? 'animate-pulse' : ''} />
+                                <span className="hidden xl:inline">{testingId === r.id ? '测试中' : '测试'}</span>
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => openEdit(r)} title="编辑">
+                                <Pencil size={14} />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => remove(r)} className="text-danger hover:bg-danger/10" title="删除">
+                                <Trash2 size={14} />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="divide-y divide-line md:hidden">
+                  {filtered.map((r) => (
+                    <div key={r.id} className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 text-muted">
+                            <Boxes size={13} />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-xs font-medium text-ink">{r.name}</span>
+                              {r.isDefault ? <span className="rounded border border-copper/30 bg-copper/10 px-1 py-0.5 text-[9px] text-copper">默认</span> : null}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[10px] text-faint">{r.url}</div>
+                          </div>
+                        </div>
+                        {testLabel(r.id)}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+                        <div>
+                          <div className="text-[10px] text-faint">命名空间</div>
+                          <div className="mt-0.5 truncate font-mono text-ink">{r.namespace || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-faint">认证</div>
+                          <div className="mt-0.5 truncate text-ink">{r.credentialId ? credName(r.credentialId) : (r.username || '匿名')}</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-end gap-1">
+                        <Button variant="secondary" size="sm" onClick={() => testSaved(r)} disabled={testingId === r.id}>
+                          <Plug size={13} />
+                          {testingId === r.id ? '测试中' : '测试'}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>
+                          <Pencil size={14} />
+                          编辑
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => remove(r)} className="text-danger">
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-</div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? '编辑镜像仓库' : '添加镜像仓库'}>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-600">名称</label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 dockerhub" />
+      <Drawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        title={editing ? '编辑镜像仓库' : '添加镜像仓库'}
+        description="推送凭证优先使用已保存凭证；未选择凭证时才使用用户名/密码。"
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Button variant="secondary" onClick={testCurrent} disabled={!url || modalTest.state === 'testing'}>
+                <Plug size={14} />
+                {modalTest.state === 'testing' ? '测试中…' : '测试连接'}
+              </Button>
+              {modalTest.state === 'success' ? <span className="text-[11px] text-success">连通正常</span> : null}
+              {modalTest.state === 'error' ? <span className="max-w-[180px] truncate text-[11px] text-danger" title={modalTest.message}>{modalTest.message || '连接失败'}</span> : null}
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-600">地址</label>
-              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="host:port" />
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowDrawer(false)}>取消</Button>
+              <Button onClick={save} disabled={busy || !name || !url}>
+                {busy ? '保存中…' : editing ? '保存修改' : '添加镜像仓库'}
+              </Button>
             </div>
           </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">命名空间</label>
-            <Input value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="可选" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-600">使用已有凭证（可选）</label>
+        }
+      >
+        <div className="space-y-7">
+          <FormSection title="基本信息" description="地址填 host:port，命名空间用于拼接镜像路径。">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="名称">
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 dockerhub" />
+              </Field>
+              <Field label="地址">
+                <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="registry.example.com" />
+              </Field>
+              <Field label="命名空间" hint="留空则不添加 namespace 前缀。" className="sm:col-span-2">
+                <Input value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="如 team-a" />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="认证" description="优先使用凭证；凭证可在「环境变量」页统一管理。">
             <CredentialSelect
               value={credentialId}
               onChange={setCredentialId}
               credentials={creds}
               onCreated={handleCredentialCreated}
               filter={(c) => c.type === 'registry'}
+              emptyLabel="不使用凭证（匿名访问）"
               allowedTypes={['registry']}
             />
-            <p className="mt-1 text-xs text-slate-400">选择后将优先使用凭证登录。</p>
-          </div>
-          {credentialId === 0 ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-600">用户名</label>
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="未选凭证时填写" />
+            {credentialId === 0 ? (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <Field label="用户名">
+                  <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="未选凭证时填写" />
+                </Field>
+                <Field label="密码">
+                  <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={editing ? '留空不修改' : '未选凭证时填写'} />
+                </Field>
               </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-600">密码</label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={editing ? '留空不修改' : '未选凭证时填写'} />
+            ) : (
+              <div className="mt-4 rounded-md border border-line bg-surface-2 px-3 py-2 text-[11px] leading-5 text-muted">
+                已选择凭证「{credName(credentialId)}」，将使用凭证信息登录；这里填写的用户名/密码不会生效。
               </div>
-            </div>
-          ) : (
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-              已选择凭证「{credName(credentialId)}」，将以凭证信息登录；输入的用户名/密码不会生效，也不会自动写入凭证。
-            </div>
-          )}
+            )}
+          </FormSection>
 
-          <div className="flex items-center justify-between border-t border-slate-100 pt-4">
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" onClick={testCurrent} disabled={!url || modalTest.state === 'testing'}>
-                <Plug size={15} />
-                {modalTest.state === 'testing' ? '测试中…' : '测试连接'}
-              </Button>
-              {modalTest.state === 'success' ? <span className="text-sm text-emerald-600">连通正常</span> : null}
-              {modalTest.state === 'error' ? <span className="text-sm text-red-600">{modalTest.message || '连接失败'}</span> : null}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setShowModal(false)}>取消</Button>
-              <Button onClick={save} disabled={busy || !name || !url}>
-                {busy ? '保存中…' : editing ? '保存修改' : '添加'}
-              </Button>
-            </div>
-          </div>
         </div>
-      </Modal>
+      </Drawer>
       <Toast toast={toast} />
     </div>
   )
