@@ -30,7 +30,6 @@ const agentVersion = "0.1.0"
 type agentConfig struct {
 	URL          string
 	Token        string
-	Name         string
 	Labels       string
 	Workdir      string
 	Concurrency  int
@@ -45,6 +44,7 @@ type client struct {
 	maxStep   time.Duration
 	labels    map[string]string
 	hostname  string
+	name      string
 
 	mu      sync.Mutex
 	running map[uint]runningJob
@@ -83,7 +83,11 @@ func main() {
 	if err := c.run(ctx); err != nil {
 		log.Fatalf("agent stopped: %v", err)
 	}
-	log.Printf("agent %q stopped", cfg.Name)
+	if c.name != "" {
+		log.Printf("agent %q stopped", c.name)
+	} else {
+		log.Printf("agent stopped")
+	}
 }
 
 func loadConfig(flagPath string) (agentConfig, error) {
@@ -118,7 +122,6 @@ func loadConfig(flagPath string) (agentConfig, error) {
 	cfg := agentConfig{
 		URL:     strings.TrimRight(strings.TrimSpace(get("NAVORI_URL", "")), "/"),
 		Token:   strings.TrimSpace(get("AGENT_TOKEN", "")),
-		Name:    strings.TrimSpace(get("AGENT_NAME", "")),
 		Labels:  get("AGENT_LABELS", ""),
 		Workdir: get("AGENT_WORKDIR", "./navori-agent"),
 	}
@@ -130,13 +133,6 @@ func loadConfig(flagPath string) (agentConfig, error) {
 	}
 	if cfg.Token == "" {
 		return cfg, fmt.Errorf("AGENT_TOKEN is required")
-	}
-	if cfg.Name == "" {
-		host, err := os.Hostname()
-		if err != nil || host == "" {
-			return cfg, fmt.Errorf("AGENT_NAME is required (hostname lookup failed)")
-		}
-		cfg.Name = host
 	}
 	cfg.Hostname, _ = os.Hostname()
 	labels, err := agentx.NormalizeLabels(cfg.Labels)
@@ -235,7 +231,6 @@ func (c *client) connect(ctx context.Context) error {
 
 func (c *client) hello(ctx context.Context) error {
 	status, data, err := c.post(ctx, "/api/agent/hello", agentx.HelloReq{
-		Name:     c.cfg.Name,
 		Version:  agentVersion,
 		Labels:   c.labels,
 		Host:     c.hostname,
@@ -254,6 +249,10 @@ func (c *client) hello(ctx context.Context) error {
 	if resp.Protocol != agentx.Protocol {
 		return fmt.Errorf("server protocol %d is not supported (agent protocol %d)", resp.Protocol, agentx.Protocol)
 	}
+	if resp.Name == "" {
+		return fmt.Errorf("server did not return an agent name")
+	}
+	c.name = resp.Name
 	if resp.HeartbeatSeconds > 0 {
 		c.heartbeat = time.Duration(resp.HeartbeatSeconds) * time.Second
 	}
@@ -261,7 +260,7 @@ func (c *client) hello(ctx context.Context) error {
 		c.maxStep = time.Duration(resp.MaxStepSeconds) * time.Second
 	}
 	log.Printf("connected to %s as %q (server %s, heartbeat %s, claimWait %ds)",
-		c.cfg.URL, c.cfg.Name, resp.ServerVersion, c.heartbeat, resp.ClaimWaitSeconds)
+		c.cfg.URL, c.name, resp.ServerVersion, c.heartbeat, resp.ClaimWaitSeconds)
 	return nil
 }
 

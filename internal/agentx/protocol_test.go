@@ -98,7 +98,6 @@ func TestJobJSONRoundTrip(t *testing.T) {
 
 func TestProtocolJSONShapes(t *testing.T) {
 	hello, err := json.Marshal(HelloReq{
-		Name:     "overseas-build-1",
 		Version:  "0.1.0",
 		Labels:   map[string]string{"role": "build", "region": "overseas"},
 		Host:     "build-01",
@@ -111,8 +110,20 @@ func TestProtocolJSONShapes(t *testing.T) {
 	if err := json.Unmarshal(hello, &h); err != nil {
 		t.Fatal(err)
 	}
-	if h["name"] != "overseas-build-1" {
-		t.Fatalf("hello json = %s", hello)
+	if _, ok := h["name"]; ok {
+		t.Fatalf("hello request should not carry name: %s", hello)
+	}
+
+	resp, err := json.Marshal(HelloResp{Protocol: Protocol, Name: "overseas-build-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hr map[string]any
+	if err := json.Unmarshal(resp, &hr); err != nil {
+		t.Fatal(err)
+	}
+	if hr["name"] != "overseas-build-1" {
+		t.Fatalf("hello response json = %s", resp)
 	}
 
 	hb, err := json.Marshal(HeartbeatResp{OK: true, Cancel: []uint{}})

@@ -73,10 +73,6 @@ func (s *Server) agentHello(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUpgradeRequired, "E_PROTOCOL", "unsupported agent protocol")
 		return
 	}
-	if req.Name != a.Name {
-		fail(w, http.StatusBadRequest, "E_VALIDATION", "agent name mismatch")
-		return
-	}
 	now := time.Now().UTC()
 	updates := map[string]interface{}{
 		"status":       "online",
@@ -93,6 +89,7 @@ func (s *Server) agentHello(w http.ResponseWriter, r *http.Request) {
 	log.Printf("agent %q connected (version=%s host=%s)", a.Name, req.Version, req.Host)
 	writeJSON(w, http.StatusOK, agentx.HelloResp{
 		Protocol:         agentx.Protocol,
+		Name:             a.Name,
 		ServerVersion:    s.Cfg.Version,
 		HeartbeatSeconds: agentx.DefaultHeartbeatSeconds,
 		ClaimWaitSeconds: agentx.DefaultClaimWaitSeconds,

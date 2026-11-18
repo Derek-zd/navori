@@ -24,7 +24,6 @@ const (
 
 // HelloReq is sent by an agent on startup and after a reconnect.
 type HelloReq struct {
-	Name     string            `json:"name"`
 	Version  string            `json:"version"`
 	Labels   map[string]string `json:"labels,omitempty"`
 	Host     string            `json:"host,omitempty"`
@@ -34,6 +33,7 @@ type HelloReq struct {
 // HelloResp tells the agent how often to poll and which limits apply.
 type HelloResp struct {
 	Protocol         int       `json:"protocol"`
+	Name             string    `json:"name"`
 	ServerVersion    string    `json:"serverVersion"`
 	HeartbeatSeconds int       `json:"heartbeatSeconds"`
 	ClaimWaitSeconds int       `json:"claimWaitSeconds"`

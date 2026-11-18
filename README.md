@@ -102,7 +102,7 @@ pull/build/push 走构建执行器，deploy 走部署执行器，审批始终留
 ```bash
 go build -o navori-agent ./cmd/agent
 cp examples/navori-agent.env.example navori-agent.env
-# 在「执行器」页创建同名 agent，复制一次性 token 到 AGENT_TOKEN，然后：
+# 在「执行器」页创建 agent，把一次性 token 复制到 AGENT_TOKEN，然后：
 ./navori-agent -config navori-agent.env
 ```
 
@@ -131,7 +131,8 @@ sudo journalctl -u navori-agent -f
 `-check` 缺失工具时只打印警告并返回 0，因为同一份二进制可能只承担构建或只承担部署；
 实际派发由执行器标签和流水线 selector 决定。
 
-所有 agent 使用同一个二进制和同一套配置模板，但 `AGENT_NAME` 与 `AGENT_TOKEN` 必须每台唯一；
+所有 agent 使用同一个二进制和同一套配置模板，但每台必须使用独立的 `AGENT_TOKEN`；
+名称在「执行器」页面登记，agent 通过 token 自动识别，不需要在配置文件里填写名称。
 标签在「执行器」页面维护（server 为准，agent 上报的 `AGENT_LABELS` 不会覆盖登记值）。能执行什么由
 机器上实际安装的工具决定：构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl。
 

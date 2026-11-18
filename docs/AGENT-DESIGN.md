@@ -108,13 +108,13 @@
 
 ```json
 POST /api/agent/hello
-{ "name": "overseas-build-1", "version": "0.1.0", "labels": {"role":"build","region":"overseas"}, "host": "build-01" }
+{ "version": "0.1.0", "labels": {"role":"build","region":"overseas"}, "host": "build-01" }
 
-200 { "protocol": 1, "serverVersion": "1.x", "heartbeatSeconds": 15, "claimWaitSeconds": 25,
-      "maxStepSeconds": 3600, "now": "2026-11-18T02:00:00Z" }
+200 { "protocol": 1, "name": "overseas-build-1", "serverVersion": "1.x", "heartbeatSeconds": 15,
+      "claimWaitSeconds": 25, "maxStepSeconds": 3600, "now": "2026-11-18T02:00:00Z" }
 ```
 
-`name` 必须与创建 agent 时一致；`labels` 以服务端登记的为准（agent 上报只用于展示，防止越权领取）。版本不匹配（`protocol` 不同）时 server 返回 426，agent 记录日志并退出，避免半兼容状态。
+agent 身份由 token 对应的登记记录决定，`name` 由 hello 响应返回供日志/展示；`labels` 以服务端登记的为准（agent 上报只用于展示，防止越权领取）。版本不匹配（`protocol` 不同）时 server 返回 426，agent 记录日志并退出，避免半兼容状态。
 
 ### 5.3 心跳
 
@@ -358,13 +358,12 @@ engine            DB                agent-overseas        agent-xiaoshan
 ```ini
 NAVORI_URL=https://navori.example.com
 AGENT_TOKEN=<创建时显示的一次性 token>
-AGENT_NAME=overseas-build-1
 AGENT_WORKDIR=/var/lib/navori-agent
 AGENT_CONCURRENCY=1
 AGENT_INSECURE_SKIP_VERIFY=false
 ```
 
-标签由「执行器」页面登记（server 为准），本文件不配置 `AGENT_LABELS`；`AGENT_NAME` / `AGENT_TOKEN` 每台唯一。
+标签由「执行器」页面登记（server 为准），本文件不配置 `AGENT_LABELS`；`AGENT_TOKEN` 每台唯一。名称在页面登记，agent 通过 token 自动识别。
 
 ### 11.3 运行
 

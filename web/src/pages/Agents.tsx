@@ -344,7 +344,7 @@ export default function Agents() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title={editing ? '编辑执行器' : '添加执行器'}
-        description={editing ? '调整这台机器愿意接收的任务类型与路由标签。' : '名称必须与目标机器上的 AGENT_NAME 完全一致。'}
+        description={editing ? '调整这台机器愿意接收的任务类型与路由标签。' : '名称是执行器身份；agent 只凭 token 识别，无需在配置里填写名称。'}
         width="max-w-[560px]"
         footer={
           <div className="flex items-center justify-between gap-3">
@@ -359,7 +359,7 @@ export default function Agents() {
         }
       >
         <div className="space-y-6">
-          <Field label="名称" hint={editing ? '名称是执行器身份，创建后不可修改。' : '例如 overseas-build-1；用于 hello 校验，不可重复。'}>
+          <Field label="名称" hint={editing ? '名称是执行器身份，创建后不可修改。' : '例如 overseas-build-1；显示在运行详情，不可重复。'}>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="overseas-build-1" disabled={!!editing} />
           </Field>
 

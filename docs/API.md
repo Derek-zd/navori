@@ -333,7 +333,7 @@ GET /api/agents                       // admin；按 id 倒序
     超过 45s 没有心跳的 online 执行器显示为 offline（服务端 janitor 15s 巡检）。
 
 POST /api/agents
-    body: { name, labels? }           // name 必须与 agent 的 AGENT_NAME 一致，≤64 字节
+    body: { name, labels? }           // name 是执行器身份/显示名，≤64 字节
     → 201 { data: { agent: Agent, token: "<一次性 token>" } }
     token 只在此响应出现；labels 由服务端登记并用于路由，agent 上报的 labels 不参与路由。
     执行器页面的「构建/部署」开关会写入 build=true / deploy=true；一台 agent 可同时具备两类能力，
@@ -354,11 +354,11 @@ DELETE /api/agents/{id}
 ### 14.2 Agent 协议
 
 POST /api/agent/hello
-    body: { name, version, labels?, host?, protocol? }
-    → 200 { protocol: 1, serverVersion, heartbeatSeconds: 15, claimWaitSeconds: 25,
+    body: { version, labels?, host?, protocol? }
+    → 200 { protocol: 1, name, serverVersion, heartbeatSeconds: 15, claimWaitSeconds: 25,
             maxStepSeconds: 3600, now }
-    name 与登记不一致 → 400 E_VALIDATION；protocol 不为 1 → 426 E_PROTOCOL。
-    labels 以服务端登记为准（本字段仅用于展示/诊断）。
+    agent 身份只由 Bearer token 对应的登记记录决定；响应中的 name 供 agent 打日志/展示。
+    protocol 不为 1 → 426 E_PROTOCOL。labels 以服务端登记为准（本字段仅用于展示/诊断）。
 
 POST /api/agent/heartbeat
     body: { version, running?: [{ stepId, runId, startedAt }], disk?: { workspaceBytes, imagesBytes } }
