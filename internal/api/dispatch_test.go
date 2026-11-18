@@ -91,6 +91,27 @@ func TestClaimStepMatchesSelector(t *testing.T) {
 	}
 }
 
+func TestClaimStepMatchesAgentID(t *testing.T) {
+	s, db := newDispatchTestServer(t)
+	_, run := newRunFixture(t, db)
+	agent := store.Agent{Name: "US", Labels: "build=true", TokenHash: "x"}
+	if err := db.Create(&agent).Error; err != nil {
+		t.Fatal(err)
+	}
+	wrong := store.Agent{Name: "other", Labels: "build=true", TokenHash: "y"}
+	db.Create(&wrong)
+	step := store.Step{RunID: run.ID, StepOrder: 1, Name: "build", Status: "queued", AgentSelector: agentx.AgentSelector(agent.ID) + ",build=true"}
+	if err := db.Create(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := s.claimStep(&wrong); err != nil || found {
+		t.Fatalf("wrong agent claimed: found=%v err=%v", found, err)
+	}
+	if _, found, err := s.claimStep(&agent); err != nil || !found {
+		t.Fatalf("addressed agent did not claim: found=%v err=%v", found, err)
+	}
+}
+
 func TestExpireStepLeasesRequeuesThenFails(t *testing.T) {
 	s, db := newDispatchTestServer(t)
 	_, run := newRunFixture(t, db)

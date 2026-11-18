@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Play, Square } from 'lucide-react'
 import { api } from '../lib/api'
-import type { Pipeline, Repository, Run, Step } from '../lib/types'
+import type { Agent, Pipeline, Repository, Run, Step } from '../lib/types'
 import { StageRail, type Stage } from '../components/StageRail'
 import { Button, Card, EmptyState, PageHeader, Status, Toast, useToast } from '../components/ui'
 import { formatDateTime, formatDuration, timeAgo } from '../lib/format'
@@ -20,6 +20,7 @@ export default function PipelinesDetail() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null)
   const [repo, setRepo] = useState<Repository | null>(null)
   const [runs, setRuns] = useState<Run[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [starting, setStarting] = useState(false)
   const { toast, setToast } = useToast()
 
@@ -46,6 +47,7 @@ export default function PipelinesDetail() {
         }
       })
       .catch(() => {})
+    api<Agent[]>('/api/agents').then(setAgents).catch(() => {})
   }, [id])
 
   useEffect(() => {
@@ -86,6 +88,14 @@ export default function PipelinesDetail() {
   const cfg = (pipeline?.config || {}) as Record<string, any>
   const deploy = (cfg.deploy || {}) as Record<string, any>
   const exec = (cfg.execution || {}) as Record<string, string>
+
+  function executionName(selector?: string) {
+    if (!selector) return '服务端本机'
+    const match = /(?:^|,)agent=(\d+)(?:,|$)/.exec(selector)
+    if (!match) return '标签 ' + selector
+    const id = Number(match[1])
+    return agents.find((a) => a.id === id)?.name || ('执行器 #' + id)
+  }
   const approval = Boolean(deploy.approval)
   const hasDeploy = Boolean(deploy.name)
 
@@ -94,7 +104,8 @@ export default function PipelinesDetail() {
     return STAGES.map(({ key, label }) => {
       const step = byName.get(key)
       let status = step?.status || 'pending'
-      let note = step?.agentName || (key === 'deploy' ? exec.deployAgent : key === 'approve' ? '服务端' : exec.buildAgent) || '本机'
+      const selected = key === 'deploy' ? exec.deployAgent : key === 'approve' ? '' : exec.buildAgent
+      let note = step?.agentName || (key === 'approve' ? '服务端' : executionName(selected))
       if (key === 'approve' && !approval) {
         status = 'skipped'
         note = '未启用'
@@ -106,7 +117,7 @@ export default function PipelinesDetail() {
       if (!latest && key !== 'approve' && key !== 'deploy') note = '尚未运行'
       return { key, label, status, note }
     })
-  }, [latest, approval, hasDeploy, exec.buildAgent, exec.deployAgent])
+  }, [latest, approval, hasDeploy, exec.buildAgent, exec.deployAgent, agents])
 
   if (!pipeline) {
     return <p className="text-sm text-muted">加载中…</p>
@@ -145,8 +156,8 @@ export default function PipelinesDetail() {
             {latest ? <Status value={latest.status} /> : <span className="text-xs text-faint">尚未运行</span>}
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-faint">
-            <span>构建 <span className="font-mono text-muted">{exec.buildAgent || '本机'}</span></span>
-            <span>部署 <span className="font-mono text-muted">{exec.deployAgent || '本机'}</span></span>
+            <span>构建 <span className="text-muted">{executionName(exec.buildAgent)}</span></span>
+            <span>部署 <span className="text-muted">{executionName(exec.deployAgent)}</span></span>
             <Link to="/agents" className="text-brand hover:underline">管理执行器</Link>
           </div>
         </div>

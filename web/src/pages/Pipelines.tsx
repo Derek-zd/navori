@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import type { DeployTarget, NotifyChannel, Pipeline, Registry, Repository, Variable } from '../lib/types'
+import type { Agent, DeployTarget, NotifyChannel, Pipeline, Registry, Repository, Variable } from '../lib/types'
 import {
   Button,
   Card,
@@ -52,6 +52,7 @@ export default function Pipelines() {
   const [repos, setRepos] = useState<Repository[]>([])
   const [regs, setRegs] = useState<Registry[]>([])
   const [dts, setDts] = useState<DeployTarget[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [globalVars, setGlobalVars] = useState<Variable[]>([])
   const [pipeVars, setPipeVars] = useState<{ key: string; value: string }[]>([])
   const [showModal, setShowModal] = useState(false)
@@ -78,13 +79,14 @@ export default function Pipelines() {
   const { toast, setToast } = useToast()
 
   async function load() {
-    const [ps, rs, gs, ds, vs, chs] = await Promise.all([
+    const [ps, rs, gs, ds, vs, chs, ags] = await Promise.all([
       api<Pipeline[]>('/api/pipelines'),
       api<Repository[]>('/api/repositories'),
       api<Registry[]>('/api/registries'),
       api<DeployTarget[]>('/api/deploy-targets'),
       api<Variable[]>('/api/variables'),
       api<NotifyChannel[]>('/api/notify-channels'),
+      api<Agent[]>('/api/agents').catch(() => []),
     ])
     setPipelines(ps)
     setRepos(rs)
@@ -92,6 +94,7 @@ export default function Pipelines() {
     setDts(ds)
     setGlobalVars(vs)
     setNotifyChannels(chs)
+    setAgents(ags)
   }
 
   useEffect(() => {
@@ -104,6 +107,60 @@ export default function Pipelines() {
 
   function deployTargetName(id: number) {
     return dts.find((t) => t.id === id)?.name || ''
+  }
+
+  function selectorAgentID(selector: string): number | null {
+    const match = /(?:^|,)agent=(\d+)(?:,|$)/.exec(selector)
+    return match ? Number(match[1]) : null
+  }
+
+  function executionName(selector: string): string {
+    if (!selector) return '服务端本机'
+    const id = selectorAgentID(selector)
+    if (!id) return '标签 ' + selector
+    return agents.find((a) => a.id === id)?.name || ('执行器 #' + id)
+  }
+
+  function executionShort(selector: string): string {
+    if (!selector) return '服务端本机'
+    const id = selectorAgentID(selector)
+    if (!id) return '自定义标签'
+    return agents.find((a) => a.id === id)?.name || ('执行器 #' + id)
+  }
+
+  function executionSummary(build: string, deploy: string): string {
+    if (!build && !deploy) return '服务端本机'
+    return '构建 ' + executionShort(build) + ' · 部署 ' + executionShort(deploy)
+  }
+
+  function executionDetail(build: string, deploy: string): string {
+    return `构建：${build || '服务端本机'}；部署：${deploy || '服务端本机'}`
+  }
+
+  function executionField(label: string, value: string, onChange: (v: string) => void, hint: string) {
+    const id = selectorAgentID(value)
+    const known = id !== null && agents.some((a) => a.id === id)
+    return (
+      <Field label={label} hint={hint}>
+        <Select
+          value={id !== null ? String(id) : value ? '__custom__' : ''}
+          onChange={(e) => {
+            const next = e.target.value
+            if (next === '__custom__') return
+            onChange(next ? 'agent=' + next : '')
+          }}
+        >
+          <option value="">服务端本机</option>
+          {agents.map((a) => (
+            <option key={a.id} value={String(a.id)}>
+              {a.name}{a.status === 'offline' ? '（离线）' : a.status === 'disabled' ? '（已禁用）' : ''}
+            </option>
+          ))}
+          {id !== null && !known ? <option value={String(id)} disabled>执行器 #{id}（不可用）</option> : null}
+          {id === null && value ? <option value="__custom__" disabled>自定义标签：{value}</option> : null}
+        </Select>
+      </Field>
+    )
   }
 
   async function copyText(text: string): Promise<boolean> {
@@ -385,7 +442,7 @@ export default function Pipelines() {
                                   </span>
                                 </Link>
                               </td>
-                              <td className="px-4 py-3">
+                              <td className="whitespace-nowrap px-4 py-3">
                                 {p.lastRun ? (
                                   <div className="flex items-center gap-2">
                                     <Status value={p.lastRun.status} />
@@ -419,11 +476,9 @@ export default function Pipelines() {
                                   ) : (
                                     <span className="text-faint">无部署</span>
                                   )}
-                                  {ex.buildAgent || ex.deployAgent ? (
-                                    <div className="mt-1 truncate font-mono text-[10px] text-faint" title={`${ex.buildAgent || '本机'} / ${ex.deployAgent || '本机'}`}>
-                                      执行 {ex.buildAgent || '本机'} / {ex.deployAgent || '本机'}
-                                    </div>
-                                  ) : null}
+                                  <div className="mt-1 truncate text-[10px] text-faint" title={executionDetail(ex.buildAgent || '', ex.deployAgent || '')}>
+                                  执行 {executionSummary(ex.buildAgent || '', ex.deployAgent || '')}
+                                </div>
                                 </div>
                               </td>
                               <td className="hidden px-4 py-3 xl:table-cell">
@@ -439,7 +494,7 @@ export default function Pipelines() {
                                   </button>
                                 </div>
                               </td>
-                              <td className="px-4 py-3">
+                              <td className="whitespace-nowrap px-4 py-3">
                                 <div className="flex items-center justify-end gap-0.5">
                                   <Button variant="ghost" size="sm" onClick={() => run(p.id)} title="运行">
                                     <Play size={14} />
@@ -496,9 +551,7 @@ export default function Pipelines() {
                             <div className="mt-0.5 text-[10px] text-faint">
                               {d.name ? `${deployTargetName(d.targetId) || '未指定目标'}${d.approval ? ' · 需审批' : ''}` : '只构建与推送镜像'}
                             </div>
-                            {ex.buildAgent || ex.deployAgent ? (
-                              <div className="mt-1 truncate font-mono text-[10px] text-faint">执行 {ex.buildAgent || '本机'} / {ex.deployAgent || '本机'}</div>
-                            ) : null}
+                            <div className="mt-1 truncate text-[10px] text-faint">执行 {executionSummary(ex.buildAgent || '', ex.deployAgent || '')}</div>
                           </div>
                           <div className="mt-3 flex items-center gap-1">
                             <Button variant="secondary" size="sm" onClick={() => run(p.id)}>
@@ -584,6 +637,13 @@ export default function Pipelines() {
                 预览：{preview.text}
               </div>
             </div>
+            <div className="mt-4">
+              {executionField('构建执行器', buildAgent, setBuildAgent, 'pull / build / push 由该执行器执行；未选择时由服务端本机执行；选中后若执行器不在线，步骤会排队等待。')}
+              <div className="mt-2 text-[11px] text-faint">
+                <Link to="/agents" className="text-brand hover:underline">管理执行器</Link>
+                <span className="ml-2">· 执行器需在线且具备对应能力</span>
+              </div>
+            </div>
           </FormSection>
 
           <FormSection title="部署" description="留空名称则只构建推送，不执行部署。">
@@ -606,29 +666,13 @@ export default function Pipelines() {
                 <Input value={deployNamespace} onChange={(e) => setDeployNamespace(e.target.value)} placeholder="default" />
               </Field>
             </div>
+            <div className="mt-4">
+              {executionField('部署执行器', deployAgent, setDeployAgent, 'deploy 由该执行器执行；未选择时由服务端本机执行。')}
+            </div>
             <label className="mt-4 flex items-start gap-2 text-xs text-muted">
               <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand" />
               <span>部署前需要审批<span className="ml-1 text-faint">审批始终在服务端执行，不会下发到执行器。</span></span>
             </label>
-          </FormSection>
-
-          <FormSection title="执行位置" description="按标签选择执行器；留空表示由 server 本机执行，审批步骤永远在服务端。">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="构建执行器 selector" hint="pull / build / push 使用此执行器">
-                <Input value={buildAgent} onChange={(e) => setBuildAgent(e.target.value)} placeholder="build=true" className="font-mono text-xs" />
-              </Field>
-              <Field label="部署执行器 selector" hint="deploy 使用此执行器">
-                <Input value={deployAgent} onChange={(e) => setDeployAgent(e.target.value)} placeholder="deploy=true" className="font-mono text-xs" />
-              </Field>
-            </div>
-            <div className="mt-3 flex items-center gap-2 text-[11px] text-faint">
-              <Link to="/agents" className="text-brand hover:underline">管理执行器</Link>
-              <span>·</span>
-              <span>selector 为逗号分隔的 key=value，全部匹配才会领取任务</span>
-            </div>
-            <p className="mt-2 text-[11px] leading-5 text-faint">
-              一台执行器可同时勾选构建与部署：两个 selector 分别填 build=true / deploy=true。若填了 selector 但没有匹配的在线执行器，步骤会保持排队，不会自动回退本机。
-            </p>
           </FormSection>
 
           <FormSection title="触发规则" description="按顺序匹配，首个命中的规则生效。">

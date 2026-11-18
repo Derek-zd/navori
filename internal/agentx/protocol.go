@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -151,6 +152,38 @@ func MatchSelector(selector, labels string) bool {
 		return false
 	}
 	for k, v := range want {
+		if got, ok := have[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
+}
+
+// AgentSelector returns the reserved selector for an individually addressed
+// agent. Agent names are display-only; ids are stable and unambiguous.
+func AgentSelector(agentID uint) string {
+	return "agent=" + strconv.FormatUint(uint64(agentID), 10)
+}
+
+// MatchAgentSelector is MatchSelector plus a reserved agent=<id> key that
+// matches the agent's database id. A user-supplied "agent" label is ignored.
+func MatchAgentSelector(selector, labels string, agentID uint) bool {
+	want, err := ParseSelector(selector)
+	if err != nil || len(want) == 0 {
+		return false
+	}
+	have, err := ParseSelector(labels)
+	if err != nil {
+		return false
+	}
+	id := strconv.FormatUint(uint64(agentID), 10)
+	for k, v := range want {
+		if k == "agent" {
+			if v != id {
+				return false
+			}
+			continue
+		}
 		if got, ok := have[k]; !ok || got != v {
 			return false
 		}

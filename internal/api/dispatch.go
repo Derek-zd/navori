@@ -113,7 +113,7 @@ func (s *Server) claimStep(a *store.Agent) (*agentx.Job, bool, error) {
 		return nil, false, err
 	}
 	for i := range steps {
-		if !agentx.MatchSelector(steps[i].AgentSelector, a.Labels) {
+		if !agentx.MatchAgentSelector(steps[i].AgentSelector, a.Labels, a.ID) {
 			continue
 		}
 		now := time.Now().UTC()

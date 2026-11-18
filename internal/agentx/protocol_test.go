@@ -147,4 +147,26 @@ func TestProtocolJSONShapes(t *testing.T) {
 	}
 }
 
+func TestMatchAgentSelector(t *testing.T) {
+	labels := "build=true,region=overseas"
+	if !MatchAgentSelector(AgentSelector(7), labels, 7) {
+		t.Fatal("agent=7 should match id 7")
+	}
+	if MatchAgentSelector(AgentSelector(7), labels, 8) {
+		t.Fatal("agent=7 should not match id 8")
+	}
+	if !MatchAgentSelector("agent=7,build=true", labels, 7) {
+		t.Fatal("combined selector should match")
+	}
+	if MatchAgentSelector("agent=7,deploy=true", labels, 7) {
+		t.Fatal("combined selector should require labels")
+	}
+	if !MatchAgentSelector("agent=7", "agent=8", 7) {
+		t.Fatal("reserved agent key must use the actual agent id")
+	}
+	if MatchAgentSelector("agent=7", "broken", 7) {
+		t.Fatal("malformed labels must not match")
+	}
+}
+
 func intPtr(v int) *int { return &v }

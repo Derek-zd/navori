@@ -194,8 +194,8 @@ PipelineConfig（defaults）= {
     approval: bool, approvers: [username]   // 空 = 任意 admin
   },
   execution: {                             // v2 分布式执行；空 = 本机执行
-    buildAgent: "role=build,region=overseas",  // pull/build/push 的 selector
-    deployAgent: "role=deploy"                 // deploy 的 selector；approve 永远本机
+    buildAgent: "role=build,region=overseas",  // pull/build/push 的 selector；也可写 agent=<id> 精确指定
+    deployAgent: "role=deploy"                 // deploy 的 selector；agent=<id> 为保留键，approve 永远本机
   }
 }
 
