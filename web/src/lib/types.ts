@@ -143,3 +143,16 @@ export interface NotifyChannel {
   type: string
   config: Record<string, string>
 }
+
+export interface Agent {
+  id: number
+  name: string
+  labels: string
+  status: string
+  version: string
+  protocol: number
+  hostname: string
+  lastSeenAt?: string
+  lastSeenIp?: string
+  createdAt?: string
+}

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
-import { Bell, Boxes, ChevronDown, ChevronRight, ClipboardCheck, FolderGit2, LayoutDashboard, LogOut, Server, Settings, Variable, Workflow } from 'lucide-react'
+import { Bell, Boxes, ChevronDown, ChevronRight, ClipboardCheck, Cpu, FolderGit2, LayoutDashboard, LogOut, Server, Settings, Variable, Workflow } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../lib/auth'
 import Brand from '../components/Brand'
 import Dashboard from './Dashboard'
 import Repositories from './Repositories'
@@ -15,18 +16,20 @@ import Variables from './Variables'
 import NotifyChannels from './NotifyChannels'
 import SettingsPage from './Settings'
 import RunDetail from './RunDetail'
+import Agents from './Agents'
 
 const mainNav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/pipelines', label: '流水线', icon: Workflow },
 ]
 
-const resourceNav = [
+const resourceNav: { to: string; label: string; icon: typeof LayoutDashboard; admin?: boolean }[] = [
   { to: '/repositories', label: '代码仓库', icon: FolderGit2 },
   { to: '/registries', label: '镜像仓库', icon: Boxes },
   { to: '/deploy-targets', label: '部署环境', icon: Server },
   { to: '/variables', label: '环境变量', icon: Variable },
   { to: '/notify-channels', label: '通知通道', icon: Bell },
+  { to: '/agents', label: '执行器', icon: Cpu, admin: true },
 ]
 
 const bottomNav = [
@@ -53,8 +56,10 @@ function NavItem({ to, label, icon, end = false }: { to: string; label: string; 
 
 export default function Shell() {
   const location = useLocation()
+  const { user } = useAuth()
   const [resourcesOpen, setResourcesOpen] = useState(true)
-  const resourcesActive = resourceNav.some((n) => location.pathname.startsWith(n.to))
+  const visibleResourceNav = resourceNav.filter((n) => !n.admin || user?.role === 'admin')
+  const resourcesActive = visibleResourceNav.some((n) => location.pathname.startsWith(n.to))
 
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
@@ -85,7 +90,7 @@ export default function Shell() {
             </button>
             {resourcesOpen ? (
               <div className="mt-1 space-y-1 pl-4">
-                {resourceNav.map((n) => (
+                {visibleResourceNav.map((n) => (
                   <NavItem key={n.to} to={n.to} label={n.label} icon={n.icon} />
                 ))}
               </div>
@@ -118,6 +123,7 @@ export default function Shell() {
           <Route path="/approvals" element={<Approvals />} />
           <Route path="/variables" element={<Variables />} />
           <Route path="/notify-channels" element={<NotifyChannels />} />
+          <Route path="/agents" element={<Agents />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/runs/:id" element={<RunDetail />} />
         </Routes>

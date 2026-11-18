@@ -78,6 +78,7 @@ func main() {
 
 	srv := &api.Server{DB: st, Auth: authSvc, Cfg: cfg, Sec: sec}
 	srv.ReapInFlight()
+	srv.StartAgentJanitor(context.Background())
 	srv.StartHealthChecker(context.Background(), time.Duration(cfg.HealthCheckInterval)*time.Minute)
 	srv.StartScheduler(context.Background())
 	srv.StartStorageCleaner(context.Background())

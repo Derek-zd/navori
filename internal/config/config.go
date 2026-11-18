@@ -54,7 +54,7 @@ func Load(flagPath string) (*Config, error) {
 
 	fileVals := map[string]string{}
 	if path != "" {
-		fv, err := parseEnvFile(path)
+		fv, err := ParseEnvFile(path)
 		if err != nil {
 			return nil, err
 		}
@@ -100,12 +100,12 @@ func Load(flagPath string) (*Config, error) {
 	return c, nil
 }
 
-// parseEnvFile reads a KEY=VALUE file (".env" style). Lines starting with '#'
+// ParseEnvFile reads a KEY=VALUE file (".env" style). Lines starting with '#'
 // and blank lines are ignored. Keys may optionally be prefixed with "export".
 // Values may be optionally wrapped in single/double quotes. An inline comment
 // (a " #" outside quotes) is stripped; to keep a literal "#" in a value, wrap
 // the value in quotes.
-func parseEnvFile(path string) (map[string]string, error) {
+func ParseEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open config file %s: %w", path, err)

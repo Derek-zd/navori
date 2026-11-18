@@ -109,14 +109,35 @@ type Run struct {
 
 // Step is one phase of a Run (pull/build/push/approve/deploy).
 type Step struct {
+	ID             uint   `gorm:"primaryKey"`
+	RunID          uint   `gorm:"index;not null"`
+	StepOrder      int    `gorm:"not null"`
+	Name           string `gorm:"size:16;not null"`
+	Status         string `gorm:"size:16;not null;default:pending"`
+	LogFile        string `gorm:"size:256"`
+	AgentSelector  string `gorm:"size:128"` // empty = run on the server
+	AgentID        uint   `gorm:"index"`    // agent that actually claimed the step
+	LeaseExpiresAt *time.Time
+	Attempt        int `gorm:"not null;default:0"`
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+}
+
+// Agent is a remote executor that polls the server for steps. Only the
+// token's sha256 hash is stored; the plaintext token is shown once on create.
+type Agent struct {
 	ID         uint   `gorm:"primaryKey"`
-	RunID      uint   `gorm:"index;not null"`
-	StepOrder  int    `gorm:"not null"`
-	Name       string `gorm:"size:16;not null"`
-	Status     string `gorm:"size:16;not null;default:pending"`
-	LogFile    string `gorm:"size:256"`
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	Name       string `gorm:"size:64;uniqueIndex;not null"`
+	Labels     string `gorm:"size:512"` // canonical "role=build,region=overseas"
+	TokenHash  string `gorm:"size:128;not null"`
+	Status     string `gorm:"size:16;not null;default:offline"` // online|offline|disabled
+	Version    string `gorm:"size:32"`
+	Protocol   int    `gorm:"not null;default:1"`
+	Hostname   string `gorm:"size:128"`
+	LastSeenAt *time.Time
+	LastSeenIP string `gorm:"size:64"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Variable is a global key-value usable in tag templates via {var.KEY}.

@@ -80,6 +80,9 @@ const STATUS: Record<string, { label: string; cls: string; dot: string }> = {
   skipped: { label: '跳过', cls: 'bg-slate-100 text-slate-600 ring-slate-500/20', dot: 'bg-slate-400' },
   cancelled: { label: '已取消', cls: 'bg-slate-100 text-slate-600 ring-slate-500/20', dot: 'bg-slate-400' },
   awaiting_approval: { label: '待审批', cls: 'bg-amber-50 text-amber-700 ring-amber-600/20', dot: 'bg-amber-500' },
+  online: { label: '在线', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', dot: 'bg-emerald-500' },
+  offline: { label: '离线', cls: 'bg-slate-100 text-slate-600 ring-slate-500/20', dot: 'bg-slate-400' },
+  disabled: { label: '已禁用', cls: 'bg-red-50 text-red-700 ring-red-600/20', dot: 'bg-red-500' },
 }
 
 export function Status({ value }: { value: string }) {

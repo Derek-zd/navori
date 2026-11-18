@@ -47,6 +47,14 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/api/system/health", s.health)
 	r.Post("/api/webhooks", s.webhook)
 
+	// executor protocol (Bearer agent token, independent of user JWT)
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAgent)
+		r.Post("/api/agent/hello", s.agentHello)
+		r.Post("/api/agent/heartbeat", s.agentHeartbeat)
+		r.Post("/api/agent/jobs/claim", s.agentClaim)
+	})
+
 	// authenticated
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
@@ -98,6 +106,12 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/api/variables", s.createVariable)
 		r.Patch("/api/variables/{id}", s.updateVariable)
 		r.Delete("/api/variables/{id}", s.deleteVariable)
+
+		r.Get("/api/agents", s.listAgents)
+		r.Post("/api/agents", s.createAgent)
+		r.Patch("/api/agents/{id}", s.updateAgent)
+		r.Post("/api/agents/{id}/rotate-token", s.rotateAgentToken)
+		r.Delete("/api/agents/{id}", s.deleteAgent)
 
 		r.Get("/api/users", s.listUsers)
 		r.Post("/api/users", s.createUser)

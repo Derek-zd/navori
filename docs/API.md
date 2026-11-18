@@ -12,6 +12,7 @@
 |---|---|
 | 2026-08-13 | 初稿 |
 | 2026-09-07 | 新增 §13.1 存储管理（用量/清理/策略）；`POST /api/system/storage/cleanup` 增加 `reclaimed` 字段，deep 语义修正为 `rm -af` + `--external` |
+| 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
 
 ---
 
@@ -66,6 +67,8 @@
 | E_INVALID_TAG | 400 | tag 模板渲染结果非法 |
 | E_CONNECT_FAILED | 400 | registry / kubeconfig 连通性失败 |
 | E_RUN_STATE | 409 | run 状态不允许该操作（如非 awaiting_approval 时审批） |
+| E_AUTH | 401 | agent token 无效或执行器已禁用（仅 `/api/agent/*`） |
+| E_PROTOCOL | 426 | agent 协议版本不匹配 |
 | E_INTERNAL | 500 | 内部错误 |
 
 ---
@@ -224,7 +227,8 @@ Run = {
 status: pending | running | awaiting_approval | success | failed | cancelled | rejected
 
 Step = { name: "pull" | "build" | "push" | "approve" | "deploy", status, startedAt, finishedAt }
-    // steps.status: pending | running | success | failed | skipped
+    // steps.status: pending | queued | running | success | failed | skipped | cancelled
+    // queued = 已派发给执行器，等待 agent 领取
 
 ### 9.1 SSE 日志流
 
@@ -299,3 +303,60 @@ PATCH /api/system/storage
     → 200 { data: { usage, cleanup } }
     自动清理：按 frequency 到期先 prune；清理后用量仍 ≥ threshold 时自动升级 deep。
 
+---
+
+## 十四、分布式执行 agent
+
+执行器（agent）是与用户 JWT 完全隔离的独立认证面：所有 `/api/agent/*` 请求使用
+`Authorization: Bearer <agent-token>`，响应为**裸 JSON**（不套 `{ data }`）。
+协议版本 `protocol = 1`；时间均为 RFC3339 UTC。token 由 server 生成（32 字节
+base64url），数据库只保存 sha256，明文仅在创建/轮换时返回一次。
+
+### 14.1 管理端（admin）
+
+Agent = {
+  id, name, labels,                    // labels 形如 "role=build,region=overseas"
+  status: "online" | "offline" | "disabled",
+  version, protocol, hostname,
+  lastSeenAt, lastSeenIp, createdAt
+}
+
+GET /api/agents                       // admin；按 id 倒序
+    → 200 { data: [Agent] }
+    超过 45s 没有心跳的 online 执行器显示为 offline（服务端 janitor 15s 巡检）。
+
+POST /api/agents
+    body: { name, labels? }           // name 必须与 agent 的 AGENT_NAME 一致，≤64 字节
+    → 201 { data: { agent: Agent, token: "<一次性 token>" } }
+    token 只在此响应出现；labels 由服务端登记并用于路由，agent 上报的 labels 不参与路由。
+
+PATCH /api/agents/{id}
+    body: { labels?, disabled? }      // 只更新给出的字段
+    → 200 { data: Agent }
+    disabled=true 后该 agent 的现有 token 立即 401；disabled=false 后等下一次心跳恢复 online。
+
+POST /api/agents/{id}/rotate-token
+    → 200 { data: { token: "<新一次性 token>" } }
+    旧 token 立即失效；agent 需更新配置并重启。
+
+DELETE /api/agents/{id}
+    → 200 { data: {} }
+
+### 14.2 Agent 协议
+
+POST /api/agent/hello
+    body: { name, version, labels?, host?, protocol? }
+    → 200 { protocol: 1, serverVersion, heartbeatSeconds: 15, claimWaitSeconds: 25,
+            maxStepSeconds: 3600, now }
+    name 与登记不一致 → 400 E_VALIDATION；protocol 不为 1 → 426 E_PROTOCOL。
+    labels 以服务端登记为准（本字段仅用于展示/诊断）。
+
+POST /api/agent/heartbeat
+    body: { version, running?: [{ stepId, runId, startedAt }], disk?: { workspaceBytes, imagesBytes } }
+    → 200 { ok: true, cancel: [stepId...] }
+    刷新 lastSeenAt，并续租该 agent 名下所有 running 步骤（lease = 120s）。
+
+POST /api/agent/jobs/claim
+    → 200 { job } | 204
+    长轮询领取步骤（服务端最多 hold 25s）；204 = 暂无任务，agent 立即重试。
+    骨架阶段（P1）尚未派发，固定返回 204。
