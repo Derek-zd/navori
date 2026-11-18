@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, Play, Plus, Search, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Copy, Play, Plus, Search, Trash2, X } from 'lucide-react'
 import { api } from '../lib/api'
 import type { DeployTarget, NotifyChannel, Pipeline, Registry, Repository, Variable } from '../lib/types'
 import { Button, Card, EmptyState, Input, Modal, PageHeader, Select, Status, Toast, useToast } from '../components/ui'
@@ -69,6 +69,41 @@ export default function Pipelines() {
 
   function deployTargetName(id: number) {
     return dts.find((t) => t.id === id)?.name || ''
+  }
+
+  // copyText prefers the async clipboard API and falls back to execCommand
+  // (clipboard API needs a secure context; navori is often served over plain
+  // http on an internal host).
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+        return true
+      }
+    } catch {
+      // fall through to the legacy path
+    }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+
+  async function copyWebhook(url: string) {
+    const ok = await copyText(url)
+    setToast(ok
+      ? { type: 'success', text: '已复制完整 Webhook URL' }
+      : { type: 'error', text: '复制失败，请手动选择' })
   }
 
   const filteredPipelines = useMemo(() => {
@@ -285,7 +320,19 @@ export default function Pipelines() {
                         </div>
                       ) : '—'}
                     </td>
-                    <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-slate-500">{p.webhookUrl}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="max-w-[14rem] truncate font-mono text-xs text-slate-500" title={p.webhookUrl}>{p.webhookUrl}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyWebhook(p.webhookUrl)}
+                          title="复制完整 URL"
+                          className="shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                        >
+                          <Copy size={13} />
+                        </button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1.5">
                         <Button variant="secondary" onClick={() => run(p.id)}>
