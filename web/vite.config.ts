@@ -11,5 +11,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          arco: ['@arco-design/web-react'],
+          icons: ['lucide-react'],
+        },
+      },
+    },
   },
 })

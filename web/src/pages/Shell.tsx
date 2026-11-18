@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Link, Route, Routes, useLocation } from 'react-router-dom'
 import {
   Bell,
@@ -23,19 +23,27 @@ import { useAuth } from '../lib/auth'
 import type { Agent, Run } from '../lib/types'
 import Brand from '../components/Brand'
 import ThemeMenu from '../components/ThemeMenu'
-import Dashboard from './Dashboard'
-import Repositories from './Repositories'
-import Pipelines from './Pipelines'
-import PipelinesDetail from './PipelinesDetail'
-import Registries from './Registries'
-import DeployTargets from './DeployTargets'
-import DeployTargetDetail from './DeployTargetDetail'
-import Approvals from './Approvals'
-import Variables from './Variables'
-import NotifyChannels from './NotifyChannels'
-import SettingsPage from './Settings'
-import RunDetail from './RunDetail'
-import Agents from './Agents'
+const Dashboard = lazy(() => import('./Dashboard'))
+const Repositories = lazy(() => import('./Repositories'))
+const Pipelines = lazy(() => import('./Pipelines'))
+const PipelinesDetail = lazy(() => import('./PipelinesDetail'))
+const Registries = lazy(() => import('./Registries'))
+const DeployTargets = lazy(() => import('./DeployTargets'))
+const DeployTargetDetail = lazy(() => import('./DeployTargetDetail'))
+const Approvals = lazy(() => import('./Approvals'))
+const Variables = lazy(() => import('./Variables'))
+const NotifyChannels = lazy(() => import('./NotifyChannels'))
+const SettingsPage = lazy(() => import('./Settings'))
+const RunDetail = lazy(() => import('./RunDetail'))
+const Agents = lazy(() => import('./Agents'))
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center text-sm text-muted">
+      加载中…
+    </div>
+  )
+}
 
 type NavItemDef = { to: string; label: string; icon: typeof LayoutDashboard; admin?: boolean }
 
@@ -318,21 +326,23 @@ export default function Shell() {
         </header>
 
         <main className="w-full max-w-[1440px] flex-1 px-4 pb-16 pt-6 md:px-8 md:pt-8">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/repositories" element={<Repositories />} />
-            <Route path="/pipelines" element={<Pipelines />} />
-            <Route path="/pipelines/:id" element={<PipelinesDetail />} />
-            <Route path="/registries" element={<Registries />} />
-            <Route path="/deploy-targets" element={<DeployTargets />} />
-            <Route path="/deploy-targets/:id" element={<DeployTargetDetail />} />
-            <Route path="/approvals" element={<Approvals />} />
-            <Route path="/variables" element={<Variables />} />
-            <Route path="/notify-channels" element={<NotifyChannels />} />
-            <Route path="/agents" element={<Agents />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/runs/:id" element={<RunDetail />} />
-          </Routes>
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/repositories" element={<Repositories />} />
+              <Route path="/pipelines" element={<Pipelines />} />
+              <Route path="/pipelines/:id" element={<PipelinesDetail />} />
+              <Route path="/registries" element={<Registries />} />
+              <Route path="/deploy-targets" element={<DeployTargets />} />
+              <Route path="/deploy-targets/:id" element={<DeployTargetDetail />} />
+              <Route path="/approvals" element={<Approvals />} />
+              <Route path="/variables" element={<Variables />} />
+              <Route path="/notify-channels" element={<NotifyChannels />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/runs/:id" element={<RunDetail />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
 
