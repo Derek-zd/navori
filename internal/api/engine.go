@@ -13,10 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"navori/internal/buildx"
-	"navori/internal/deploy"
 	"navori/internal/gitx"
 	"navori/internal/notify"
+	"navori/internal/runner"
 	"navori/internal/store"
 	"navori/internal/tagx"
 )
@@ -168,32 +167,13 @@ func (s *Server) executeStep(ctx context.Context, run *store.Run, repo *store.Re
 }
 
 func (s *Server) stepPull(ctx context.Context, w io.Writer, repo *store.Repository, branch string) error {
-	dir := s.repoDir(repo.ID)
-	url := s.cloneURL(repo)
-	fmt.Fprintf(w, "branch=%s\n", branch)
-
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		if err := gitx.CloneW(dir, url, branch, w); err != nil {
-			return err
-		}
-		if branch != "" {
-			if err := gitx.CheckoutW(dir, branch, w); err != nil {
-				return err
-			}
-		}
-	} else {
-		if err := gitx.CheckoutW(dir, branch, w); err != nil {
-			return err
-		}
-		if err := gitx.PullW(dir, w); err != nil {
-			return err
-		}
-	}
-	if hc, err := gitx.HeadCommit(dir); err == nil {
-		fmt.Fprintf(w, "HEAD commit: %s\n", hc)
-	}
-	return nil
+	return runner.Pull(ctx, w, runner.PullSpec{
+		GitURL: s.cloneURL(repo),
+		Branch: branch,
+		Dir:    s.repoDir(repo.ID),
+	})
 }
+
 func (s *Server) stepBuild(ctx context.Context, w io.Writer, repo *store.Repository, rc resolvedConfig, imageTag string) error {
 	dockerfile := rc.DockerfilePath
 	if dockerfile == "" {
@@ -202,39 +182,27 @@ func (s *Server) stepBuild(ctx context.Context, w io.Writer, repo *store.Reposit
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
 	}
-	context := rc.BuildContext
-	if context == "" {
-		context = "."
-	}
-	dockerConfig := filepath.Join(s.Cfg.DataDir, "docker-config")
-	if err := os.MkdirAll(dockerConfig, 0o755); err != nil {
-		return err
-	}
-	configPath := filepath.Join(dockerConfig, "config.json")
-	if _, err := os.Stat(configPath); err != nil {
-		_ = os.WriteFile(configPath, []byte("{\"auths\":{}}"), 0o600)
-	}
-	return buildx.Build(ctx, w, s.repoDir(repo.ID), dockerfile, imageTag, rc.Platform, rc.BuildArgs, dockerConfig)
+	return runner.Build(ctx, w, runner.BuildSpec{
+		Dir:             s.repoDir(repo.ID),
+		Dockerfile:      dockerfile,
+		Image:           imageTag,
+		Platform:        rc.Platform,
+		Args:            rc.BuildArgs,
+		DockerConfigDir: filepath.Join(s.Cfg.DataDir, "docker-config"),
+	})
 }
+
 func (s *Server) stepPush(ctx context.Context, w io.Writer, rc resolvedConfig, imageTag string) error {
-	if rc.RegistryID == 0 {
-		return buildx.Push(ctx, w, imageTag, "")
-	}
-	var reg store.Registry
-	if err := s.DB.DB.First(&reg, rc.RegistryID).Error; err != nil {
-		return err
-	}
-	username, password := s.registryCredentials(&reg)
-	configDir := ""
-	if username != "" {
-		var err error
-		configDir, err = buildx.WriteAuthConfig(reg.URL, username, password)
-		if err != nil {
+	sp := runner.PushSpec{Image: imageTag}
+	if rc.RegistryID != 0 {
+		var reg store.Registry
+		if err := s.DB.DB.First(&reg, rc.RegistryID).Error; err != nil {
 			return err
 		}
-		defer os.RemoveAll(configDir)
+		sp.RegistryURL = reg.URL
+		sp.Username, sp.Password = s.registryCredentials(&reg)
 	}
-	return buildx.Push(ctx, w, imageTag, configDir)
+	return runner.Push(ctx, w, sp)
 }
 
 // stepApprove sets run to awaiting_approval and waits for an approve/reject decision.
@@ -292,12 +260,6 @@ func (s *Server) stepDeploy(ctx context.Context, w io.Writer, rc resolvedConfig,
 	if dt.KubeconfigEnc != "" {
 		kubeconfig, _ = s.Sec.Decrypt(dt.KubeconfigEnc)
 	}
-	path, err := writeTempKubeconfig(kubeconfig)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(path)
-
 	kind := rc.Deploy.Kind
 	if kind == "" {
 		kind = "Deployment"
@@ -310,30 +272,16 @@ func (s *Server) stepDeploy(ctx context.Context, w io.Writer, rc resolvedConfig,
 	if container == "" {
 		container = rc.ImageName
 	}
-	t := deploy.Target{Kubeconfig: path, Kind: kind, Name: rc.Deploy.Name, Namespace: namespace, Container: container, Image: imageTag}
-
-	fmt.Fprintf(w, "deploy:\n")
-	fmt.Fprintf(w, "  目标: %s\n", dt.Name)
-	fmt.Fprintf(w, "  workload: %s/%s\n", kind, rc.Deploy.Name)
-	fmt.Fprintf(w, "  命名空间: %s\n", namespace)
-	fmt.Fprintf(w, "  容器: %s\n", container)
-	fmt.Fprintf(w, "  镜像: %s\n", imageTag)
-
-	if err := deploy.SetImage(ctx, w, t); err != nil {
-		return err
-	}
-	// 0-replica workloads (scaled-to-zero) have no rollout to wait for:
-	// set image succeeding is the whole deployment. Anything else waits for
-	// the rollout and rolls back on failure.
-	if replicas, _ := deploy.Replicas(ctx, w, t); replicas == 0 {
-		fmt.Fprintf(w, "  副本数: 0 —— 无 rollout 可等待,镜像已更新(set image 成功即部署完成)\n")
-		return nil
-	}
-	if err := deploy.RolloutStatus(ctx, w, t, "5m"); err != nil {
-		_ = deploy.RolloutUndo(ctx, w, t)
-		return err
-	}
-	return nil
+	return runner.Deploy(ctx, w, runner.DeploySpec{
+		Kubeconfig: kubeconfig,
+		TargetName: dt.Name,
+		Kind:       kind,
+		Name:       rc.Deploy.Name,
+		Namespace:  namespace,
+		Container:  container,
+		Image:      imageTag,
+		Timeout:    5 * time.Minute,
+	})
 }
 
 // notifyTerminal sends notifications when a run reaches a terminal state.
