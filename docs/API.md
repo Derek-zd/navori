@@ -321,7 +321,8 @@ base64url），数据库只保存 sha256，明文仅在创建/轮换时返回一
 ### 14.1 管理端（admin）
 
 Agent = {
-  id, name, labels,                    // labels 形如 "role=build,region=overseas"
+  id, name, labels,                    // labels 形如 "build=true,region=overseas"
+                                      // 能力约定：build=true / deploy=true；旧 role=build / role=deploy 兼容
   status: "online" | "offline" | "disabled",
   version, protocol, hostname,
   lastSeenAt, lastSeenIp, createdAt
@@ -335,6 +336,8 @@ POST /api/agents
     body: { name, labels? }           // name 必须与 agent 的 AGENT_NAME 一致，≤64 字节
     → 201 { data: { agent: Agent, token: "<一次性 token>" } }
     token 只在此响应出现；labels 由服务端登记并用于路由，agent 上报的 labels 不参与路由。
+    执行器页面的「构建/部署」开关会写入 build=true / deploy=true；一台 agent 可同时具备两类能力，
+    流水线分别用 build=true / deploy=true 作为 selector 选择。
 
 PATCH /api/agents/{id}
     body: { labels?, disabled? }      // 只更新给出的字段

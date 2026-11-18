@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Cpu, KeyRound, Plus, Power, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { Cpu, KeyRound, Pencil, Plus, Power, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Agent } from '../lib/types'
 import {
@@ -19,6 +19,22 @@ import { formatDateTime, timeAgo } from '../lib/format'
 
 function labelList(value: string) {
   return value.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
+function hasCapability(labels: string, kind: 'build' | 'deploy') {
+  const tags = labelList(labels)
+  return tags.includes(kind + '=true') || tags.includes('role=' + kind)
+}
+
+function isCapabilityTag(tag: string) {
+  return tag === 'build=true' || tag === 'deploy=true' || tag === 'role=build' || tag === 'role=deploy'
+}
+
+function capabilityTags(labels: string) {
+  const out: string[] = []
+  if (hasCapability(labels, 'build')) out.push('构建')
+  if (hasCapability(labels, 'deploy')) out.push('部署')
+  return out
 }
 
 async function copyText(text: string) {
@@ -47,9 +63,13 @@ async function copyText(text: string) {
 
 export default function Agents() {
   const [agents, setAgents] = useState<Agent[]>([])
-  const [showCreate, setShowCreate] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editing, setEditing] = useState<Agent | null>(null)
   const [name, setName] = useState('')
-  const [labels, setLabels] = useState('')
+  const [canBuild, setCanBuild] = useState(false)
+  const [canDeploy, setCanDeploy] = useState(false)
+  const [extraTags, setExtraTags] = useState('')
+  const [originalTags, setOriginalTags] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [tokenInfo, setTokenInfo] = useState<{ name: string; token: string } | null>(null)
   const { toast, setToast } = useToast()
@@ -69,23 +89,61 @@ export default function Agents() {
   }, [])
 
   function openCreate() {
+    setEditing(null)
     setName('')
-    setLabels('')
-    setShowCreate(true)
+    setCanBuild(false)
+    setCanDeploy(false)
+    setExtraTags('')
+    setOriginalTags([])
+    setDrawerOpen(true)
   }
 
-  async function create() {
+  function openEdit(a: Agent) {
+    const tags = labelList(a.labels)
+    setEditing(a)
+    setName(a.name)
+    setCanBuild(hasCapability(a.labels, 'build'))
+    setCanDeploy(hasCapability(a.labels, 'deploy'))
+    setExtraTags(tags.filter((t) => !isCapabilityTag(t)).join(','))
+    setOriginalTags(tags)
+    setDrawerOpen(true)
+  }
+
+  function composedLabels() {
+    const out = labelList(extraTags).filter((t) => !/^(build|deploy)=/.test(t) && t !== 'role=build' && t !== 'role=deploy')
+    if (canBuild) {
+      out.push('build=true')
+      if (originalTags.includes('role=build')) out.push('role=build')
+    }
+    if (canDeploy) {
+      out.push('deploy=true')
+      if (originalTags.includes('role=deploy')) out.push('role=deploy')
+    }
+    return out
+  }
+
+  async function save() {
     setBusy(true)
     try {
-      const res = await api<{ agent: Agent; token: string }>('/api/agents', {
-        method: 'POST',
-        body: JSON.stringify({ name, labels }),
-      })
-      setShowCreate(false)
-      setTokenInfo({ name: res.agent.name, token: res.token })
+      const labels = composedLabels().join(',')
+      if (editing) {
+        await api('/api/agents/' + editing.id, {
+          method: 'PATCH',
+          body: JSON.stringify({ labels }),
+        })
+        setToast({ type: 'success', text: '执行器已更新' })
+      } else {
+        const res = await api<{ agent: Agent; token: string }>('/api/agents', {
+          method: 'POST',
+          body: JSON.stringify({ name, labels }),
+        })
+        setTokenInfo({ name: res.agent.name, token: res.token })
+        setToast({ type: 'success', text: '执行器已创建' })
+      }
+      setDrawerOpen(false)
       await load()
     } catch (e) {
-      setToast({ type: 'error', text: e instanceof Error ? e.message : '创建失败' })
+      setToast({ type: 'error', text: e instanceof Error ? e.message : '保存失败' })
     } finally {
       setBusy(false)
     }
@@ -185,7 +243,7 @@ export default function Agents() {
                   <tr className="border-b border-line text-left text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
                     <th className="px-5 py-3 font-medium">执行器</th>
                     <th className="px-5 py-3 font-medium">状态</th>
-                    <th className="px-5 py-3 font-medium">标签</th>
+                    <th className="px-5 py-3 font-medium">能力 / 标签</th>
                     <th className="hidden px-5 py-3 font-medium xl:table-cell">版本 / 协议</th>
                     <th className="px-5 py-3 font-medium">最后心跳</th>
                     <th className="px-5 py-3 text-right font-medium">操作</th>
@@ -206,11 +264,14 @@ export default function Agents() {
                         </div>
                       </td>
                       <td className="px-5 py-3"><Status value={a.status} /></td>
-                      <td className="max-w-[260px] px-5 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {labelList(a.labels).length > 0 ? labelList(a.labels).map((l) => (
+                      <td className="max-w-[300px] px-5 py-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {capabilityTags(a.labels).length > 0 ? capabilityTags(a.labels).map((c) => (
+                            <span key={c} className="rounded border border-brand/20 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">{c}</span>
+                          )) : <span className="text-[11px] text-faint">能力未标注</span>}
+                          {labelList(a.labels).filter((l) => !isCapabilityTag(l)).map((l) => (
                             <span key={l} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">{l}</span>
-                          )) : <span className="text-[11px] text-faint">未设置标签</span>}
+                          ))}
                         </div>
                       </td>
                       <td className="hidden px-5 py-3 font-mono text-[10px] text-faint xl:table-cell">{a.version || '—'} / p{a.protocol}</td>
@@ -220,6 +281,9 @@ export default function Agents() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex justify-end gap-0.5">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(a)} title="编辑能力与标签">
+                            <Pencil size={14} />
+                          </Button>
                           <Button variant="ghost" size="sm" onClick={() => rotate(a)} title="轮换 token">
                             <KeyRound size={14} />
                             <span className="hidden xl:inline">token</span>
@@ -249,14 +313,18 @@ export default function Agents() {
                     </div>
                     <Status value={a.status} />
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {labelList(a.labels).length > 0 ? labelList(a.labels).map((l) => (
+                  <div className="mt-3 flex flex-wrap items-center gap-1">
+                    {capabilityTags(a.labels).length > 0 ? capabilityTags(a.labels).map((c) => (
+                      <span key={c} className="rounded border border-brand/20 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">{c}</span>
+                    )) : <span className="text-[11px] text-faint">能力未标注</span>}
+                    {labelList(a.labels).filter((l) => !isCapabilityTag(l)).map((l) => (
                       <span key={l} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">{l}</span>
-                    )) : <span className="text-[11px] text-faint">未设置标签</span>}
+                    ))}
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <span className="text-[10px] text-faint">心跳 {timeAgo(a.lastSeenAt)}</span>
                     <div className="flex gap-0.5">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(a)} title="编辑能力与标签"><Pencil size={14} /></Button>
                       <Button variant="ghost" size="sm" onClick={() => rotate(a)} title="轮换 token"><KeyRound size={14} /></Button>
                       <Button variant="ghost" size="sm" onClick={() => toggle(a)} title={a.status === 'disabled' ? '启用' : '禁用'}><Power size={14} /></Button>
                       <Button variant="ghost" size="sm" onClick={() => remove(a)} className="text-danger hover:bg-danger/10" title="删除"><Trash2 size={14} /></Button>
@@ -273,33 +341,75 @@ export default function Agents() {
       </Card>
 
       <Drawer
-        open={showCreate}
-        onClose={() => setShowCreate(false)}
-        title="添加执行器"
-        description="名称必须与目标机器上的 AGENT_NAME 完全一致。"
-        width="max-w-[520px]"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title={editing ? '编辑执行器' : '添加执行器'}
+        description={editing ? '调整这台机器愿意接收的任务类型与路由标签。' : '名称必须与目标机器上的 AGENT_NAME 完全一致。'}
+        width="max-w-[560px]"
         footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowCreate(false)}>取消</Button>
-            <Button onClick={create} disabled={busy || !name.trim()}>{busy ? '创建中…' : '创建'}</Button>
+          <div className="flex items-center justify-between gap-3">
+            <span className="hidden text-[11px] text-faint sm:block">能力会写入 build=true / deploy=true 标签</span>
+            <div className="ml-auto flex gap-2">
+              <Button variant="secondary" onClick={() => setDrawerOpen(false)}>取消</Button>
+              <Button onClick={save} disabled={busy || !name.trim() || (!canBuild && !canDeploy)}>
+                {busy ? '保存中…' : editing ? '保存修改' : '创建'}
+              </Button>
+            </div>
           </div>
         }
       >
-        <div className="space-y-5">
-          <Field label="名称" hint="例如 overseas-build-1；用于 hello 校验，不可重复。">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="overseas-build-1" />
+        <div className="space-y-6">
+          <Field label="名称" hint={editing ? '名称是执行器身份，创建后不可修改。' : '例如 overseas-build-1；用于 hello 校验，不可重复。'}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="overseas-build-1" disabled={!!editing} />
           </Field>
-          <Field label="标签" hint="逗号分隔的 key=value。流水线用 selector 按标签选择执行器，例如 role=build,region=overseas。">
-            <Input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="role=build,region=overseas" className="font-mono text-xs" />
-          </Field>
-          <FormSection title="接入步骤" description="创建后复制一次性 token，在目标机器上启动 agent。">
-            <ol className="space-y-2 text-[11px] leading-5 text-muted">
-              <li className="flex gap-2"><span className="font-mono text-faint">01</span><span>在目标机器安装 git、docker（或 podman）与 kubectl。</span></li>
-              <li className="flex gap-2"><span className="font-mono text-faint">02</span><span>把 token 写入 <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[10px]">navori-agent.env</code> 的 <code className="font-mono text-[10px]">AGENT_TOKEN</code>。</span></li>
-              <li className="flex gap-2"><span className="font-mono text-faint">03</span><span>启动 agent；它只主动出站访问服务端，不读取数据库。</span></li>
-            </ol>
-            <pre className="mt-3 overflow-x-auto rounded-md border border-line bg-surface px-3 py-2 font-mono text-[10px] text-ink">./navori-agent -config navori-agent.env</pre>
+
+          <FormSection title="能做什么" description="一台机器可以同时承担构建和部署；实际能否成功还取决于本机工具与网络。">
+            <div className="space-y-2">
+              <label className={'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ' + (canBuild ? 'border-brand/40 bg-brand/5' : 'border-line bg-surface hover:bg-surface-2/60')}>
+                <input type="checkbox" checked={canBuild} onChange={(e) => setCanBuild(e.target.checked)} className="mt-0.5 accent-brand" />
+                <span>
+                  <span className="block text-xs font-medium text-ink">可以执行构建</span>
+                  <span className="mt-0.5 block text-[11px] leading-5 text-muted">pull / build / push；需要 git、docker 或 podman，以及镜像仓库网络。</span>
+                </span>
+              </label>
+              <label className={'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ' + (canDeploy ? 'border-brand/40 bg-brand/5' : 'border-line bg-surface hover:bg-surface-2/60')}>
+                <input type="checkbox" checked={canDeploy} onChange={(e) => setCanDeploy(e.target.checked)} className="mt-0.5 accent-brand" />
+                <span>
+                  <span className="block text-xs font-medium text-ink">可以执行部署</span>
+                  <span className="mt-0.5 block text-[11px] leading-5 text-muted">deploy；需要 kubectl，以及目标集群 API 的网络连通性。</span>
+                </span>
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-faint">
+              保存后会写入 <code className="font-mono text-[10px]">build=true</code> / <code className="font-mono text-[10px]">deploy=true</code>。
+              流水线的构建执行器 selector 填 <code className="font-mono text-[10px]">build=true</code>，部署执行器 selector 填 <code className="font-mono text-[10px]">deploy=true</code>；同一台机器两个都勾选即可两类都接。
+              能力是标签约定，最终仍以流水线 selector 匹配为准。
+            </p>
           </FormSection>
+
+          <Field label="路由标签（可选）" hint="逗号分隔的 key=value；用于区域、集群等路由条件，例如 region=overseas,cluster=xiaoshan。">
+            <Input value={extraTags} onChange={(e) => setExtraTags(e.target.value)} placeholder="region=overseas,cluster=xiaoshan" className="font-mono text-xs" />
+          </Field>
+
+          <div className="rounded-md border border-line bg-surface-2/60 px-3 py-2">
+            <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">保存后的标签</div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {composedLabels().length > 0 ? composedLabels().map((l) => (
+                <span key={l} className="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted">{l}</span>
+              )) : <span className="text-[11px] text-faint">至少选择一种能力</span>}
+            </div>
+          </div>
+
+          {!editing && (
+            <FormSection title="接入步骤" description="创建后复制一次性 token，在目标机器上启动 agent。">
+              <ol className="space-y-2 text-[11px] leading-5 text-muted">
+                <li className="flex gap-2"><span className="font-mono text-faint">01</span><span>在目标机器安装 git、docker（或 podman）与 kubectl；按角色取舍。</span></li>
+                <li className="flex gap-2"><span className="font-mono text-faint">02</span><span>把 token 写入 <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[10px]">navori-agent.env</code> 的 <code className="font-mono text-[10px]">AGENT_TOKEN</code>。</span></li>
+                <li className="flex gap-2"><span className="font-mono text-faint">03</span><span>启动 agent；它只主动出站访问服务端，不读取数据库。</span></li>
+              </ol>
+              <pre className="mt-3 overflow-x-auto rounded-md border border-line bg-surface px-3 py-2 font-mono text-[10px] text-ink">./navori-agent -config navori-agent.env</pre>
+            </FormSection>
+          )}
         </div>
       </Drawer>
 

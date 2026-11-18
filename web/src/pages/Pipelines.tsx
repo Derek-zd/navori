@@ -612,13 +612,13 @@ export default function Pipelines() {
             </label>
           </FormSection>
 
-          <FormSection title="执行位置" description="按标签选择执行器。留空表示在本机执行，审批步骤永远在服务端。">
+          <FormSection title="执行位置" description="按标签选择执行器；留空表示由 server 本机执行，审批步骤永远在服务端。">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="构建执行器 selector" hint="pull / build / push 使用此执行器">
-                <Input value={buildAgent} onChange={(e) => setBuildAgent(e.target.value)} placeholder="role=build,region=overseas" className="font-mono text-xs" />
+                <Input value={buildAgent} onChange={(e) => setBuildAgent(e.target.value)} placeholder="build=true" className="font-mono text-xs" />
               </Field>
               <Field label="部署执行器 selector" hint="deploy 使用此执行器">
-                <Input value={deployAgent} onChange={(e) => setDeployAgent(e.target.value)} placeholder="role=deploy" className="font-mono text-xs" />
+                <Input value={deployAgent} onChange={(e) => setDeployAgent(e.target.value)} placeholder="deploy=true" className="font-mono text-xs" />
               </Field>
             </div>
             <div className="mt-3 flex items-center gap-2 text-[11px] text-faint">
@@ -626,6 +626,9 @@ export default function Pipelines() {
               <span>·</span>
               <span>selector 为逗号分隔的 key=value，全部匹配才会领取任务</span>
             </div>
+            <p className="mt-2 text-[11px] leading-5 text-faint">
+              一台执行器可同时勾选构建与部署：两个 selector 分别填 build=true / deploy=true。若填了 selector 但没有匹配的在线执行器，步骤会保持排队，不会自动回退本机。
+            </p>
           </FormSection>
 
           <FormSection title="触发规则" description="按顺序匹配，首个命中的规则生效。">

@@ -87,8 +87,15 @@ K8s 部署（MySQL + Secret 注入密钥）直接用模板：[examples/k8s/navor
 ## 分布式执行（可选）
 
 默认所有步骤在本机执行。需要跨网络构建/部署时，可在「执行器」页登记 agent，并把流水线的
-`execution.buildAgent` / `execution.deployAgent` 设为 label selector（如 `role=build,region=overseas`）。
+`execution.buildAgent` / `execution.deployAgent` 设为 label selector。
+
+执行器页面用「可以执行构建 / 可以执行部署」两个开关设置能力，分别写入 `build=true` / `deploy=true`
+标签；流水线的构建 selector 填 `build=true`，部署 selector 填 `deploy=true`。一台机器可以同时勾选两类，
+两个 selector 分别指向这两个标签即可。已有的 `role=build` / `role=deploy` 标签仍可继续使用。
+
 pull/build/push 走构建执行器，deploy 走部署执行器，审批始终留在 server。
+如果两个 selector 都留空，步骤仍由 server 本机执行；一旦填了 selector 但没有匹配的在线执行器，
+步骤会保持排队直到超时，不会自动回退本机。
 
 构建 agent 二进制：
 
@@ -99,9 +106,12 @@ cp examples/navori-agent.env.example navori-agent.env
 ./navori-agent -config navori-agent.env
 ```
 
+所有 agent 使用同一个二进制和同一套配置模板，但 `AGENT_NAME` 与 `AGENT_TOKEN` 必须每台唯一；
+标签在「执行器」页面维护（server 为准，agent 上报的 `AGENT_LABELS` 不会覆盖登记值）。能执行什么由
+机器上实际安装的工具决定：构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl。
+
 agent 只主动发起出站 HTTPS（hello/心跳/领任务/传日志/报结果），不监听端口、不访问数据库、
-不写 server 的 DATA_DIR。构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl；
-凭据随任务下发，仅以 0600 临时文件或临时 DOCKER_CONFIG 使用后删除。
+不写 server 的 DATA_DIR。凭据随任务下发，仅以 0600 临时文件或临时 DOCKER_CONFIG 使用后删除。
 配置项见 [examples/navori-agent.env.example](examples/navori-agent.env.example)，协议见 docs/API.md §十四。
 
 ## 项目结构
