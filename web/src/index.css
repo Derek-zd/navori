@@ -2,12 +2,324 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+
+  --canvas: 244 242 237;
+  --surface: 251 250 247;
+  --surface-2: 238 235 228;
+  --raised: 255 255 255;
+  --line: 222 217 206;
+  --line-strong: 201 195 181;
+  --ink: 25 28 25;
+  --muted: 102 106 98;
+  --faint: 140 144 135;
+
+  --brand: 39 90 75;
+  --brand-strong: 31 73 61;
+  --brand-soft: 228 237 232;
+  --on-brand: 255 255 255;
+  --copper: 185 98 54;
+  --copper-soft: 243 228 218;
+
+  --success: 44 110 73;
+  --success-soft: 227 239 231;
+  --warning: 154 103 0;
+  --warning-soft: 245 235 214;
+  --danger: 163 58 50;
+  --danger-soft: 244 227 224;
+  --info: 63 97 125;
+  --info-soft: 227 235 241;
+
+  --slate-50: 247 245 240;
+  --slate-100: 238 235 228;
+  --slate-200: 222 217 206;
+  --slate-300: 201 195 181;
+  --slate-400: 154 158 147;
+  --slate-500: 122 126 116;
+  --slate-600: 95 99 91;
+  --slate-700: 69 73 65;
+  --slate-800: 46 50 45;
+  --slate-900: 25 28 25;
+  --slate-950: 16 18 16;
+
+  --indigo-50: 228 237 232;
+  --indigo-100: 214 229 222;
+  --indigo-200: 190 215 205;
+  --indigo-300: 151 190 175;
+  --indigo-400: 111 161 142;
+  --indigo-500: 55 116 98;
+  --indigo-600: 39 90 75;
+  --indigo-700: 31 73 61;
+  --indigo-800: 24 58 48;
+  --indigo-900: 18 44 36;
+
+  --emerald-50: 227 239 231;
+  --emerald-100: 211 231 218;
+  --emerald-500: 44 110 73;
+  --emerald-600: 44 110 73;
+  --emerald-700: 36 91 60;
+
+  --red-50: 244 227 224;
+  --red-100: 238 211 207;
+  --red-500: 163 58 50;
+  --red-600: 163 58 50;
+  --red-700: 135 47 41;
+
+  --amber-50: 245 235 214;
+  --amber-100: 239 224 193;
+  --amber-500: 154 103 0;
+  --amber-600: 154 103 0;
+  --amber-700: 128 85 0;
+
+  --blue-50: 227 235 241;
+  --blue-100: 211 225 235;
+  --blue-500: 63 97 125;
+  --blue-600: 63 97 125;
+  --blue-700: 51 80 104;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --canvas: 16 18 16;
+  --surface: 24 27 24;
+  --surface-2: 32 36 32;
+  --raised: 32 36 32;
+  --line: 46 51 45;
+  --line-strong: 60 66 59;
+  --ink: 233 234 227;
+  --muted: 164 168 158;
+  --faint: 119 124 115;
+
+  --brand: 143 191 173;
+  --brand-strong: 168 210 194;
+  --brand-soft: 34 53 46;
+  --on-brand: 16 18 16;
+  --copper: 217 138 95;
+  --copper-soft: 59 42 32;
+
+  --success: 111 191 143;
+  --success-soft: 31 51 39;
+  --warning: 214 168 74;
+  --warning-soft: 58 47 27;
+  --danger: 224 128 120;
+  --danger-soft: 58 36 34;
+  --info: 143 179 204;
+  --info-soft: 30 45 56;
+
+  --slate-50: 24 27 24;
+  --slate-100: 32 36 32;
+  --slate-200: 46 51 45;
+  --slate-300: 60 66 59;
+  --slate-400: 119 124 115;
+  --slate-500: 164 168 158;
+  --slate-600: 183 186 177;
+  --slate-700: 201 204 195;
+  --slate-800: 216 218 211;
+  --slate-900: 233 234 227;
+  --slate-950: 245 246 240;
+
+  --indigo-50: 34 53 46;
+  --indigo-100: 40 63 54;
+  --indigo-200: 51 80 69;
+  --indigo-300: 168 210 194;
+  --indigo-400: 153 201 183;
+  --indigo-500: 143 191 173;
+  --indigo-600: 143 191 173;
+  --indigo-700: 168 210 194;
+  --indigo-800: 190 222 209;
+  --indigo-900: 213 237 226;
+
+  --emerald-50: 31 51 39;
+  --emerald-100: 39 64 49;
+  --emerald-500: 111 191 143;
+  --emerald-600: 111 191 143;
+  --emerald-700: 137 207 164;
+
+  --red-50: 58 36 34;
+  --red-100: 72 44 41;
+  --red-500: 224 128 120;
+  --red-600: 224 128 120;
+  --red-700: 233 157 150;
+
+  --amber-50: 58 47 27;
+  --amber-100: 72 58 33;
+  --amber-500: 214 168 74;
+  --amber-600: 214 168 74;
+  --amber-700: 226 185 99;
+
+  --blue-50: 30 45 56;
+  --blue-100: 37 56 69;
+  --blue-500: 143 179 204;
+  --blue-600: 143 179 204;
+  --blue-700: 168 199 219;
+}
+
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: rgb(var(--canvas));
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  @apply bg-slate-50 text-slate-900;
+  margin: 0;
+  min-height: 100vh;
+  background: rgb(var(--canvas));
+  color: rgb(var(--ink));
+  font-family: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-feature-settings: "ss01" 1;
+}
+
+::selection {
+  background: rgb(var(--copper) / 0.22);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line-strong)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--line-strong));
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Arco component tokens: keep behaviour, replace the default blue. */
+body {
+  --primary-1: 236, 243, 240;
+  --primary-2: 218, 233, 227;
+  --primary-3: 190, 215, 205;
+  --primary-4: 151, 190, 175;
+  --primary-5: 95, 153, 132;
+  --primary-6: 39, 90, 75;
+  --primary-7: 31, 73, 61;
+  --primary-8: 24, 58, 48;
+  --primary-9: 18, 44, 36;
+  --primary-10: 13, 31, 25;
+  --link-1: 236, 243, 240;
+  --link-2: 218, 233, 227;
+  --link-3: 190, 215, 205;
+  --link-4: 151, 190, 175;
+  --link-5: 95, 153, 132;
+  --link-6: 39, 90, 75;
+  --link-7: 31, 73, 61;
+  --link-8: 24, 58, 48;
+  --link-9: 18, 44, 36;
+  --link-10: 13, 31, 25;
+  --success-6: 44, 110, 73;
+  --warning-6: 154, 103, 0;
+  --danger-6: 163, 58, 50;
+  --color-bg-1: #fbfaf7;
+  --color-bg-2: #fbfaf7;
+  --color-bg-3: #fbfaf7;
+  --color-bg-4: #fbfaf7;
+  --color-bg-5: #fbfaf7;
+  --color-bg-white: #ffffff;
+  --color-text-1: #191c19;
+  --color-text-2: #45493f;
+  --color-text-3: #666a62;
+  --color-text-4: #8c9087;
+  --color-border: #ded9ce;
+  --color-border-1: #eeeae0;
+  --color-border-2: #ded9ce;
+  --color-border-3: #c9c3b5;
+  --color-border-4: #9a9e93;
+  --color-fill-1: rgba(25, 28, 25, 0.03);
+  --color-fill-2: rgba(25, 28, 25, 0.06);
+  --color-fill-3: rgba(25, 28, 25, 0.09);
+  --color-fill-4: rgba(25, 28, 25, 0.13);
+  --border-radius-small: 4px;
+  --border-radius-medium: 6px;
+  --border-radius-large: 8px;
+}
+
+body[arco-theme="dark"] {
+  --primary-1: 30, 46, 39;
+  --primary-2: 35, 54, 46;
+  --primary-3: 44, 68, 58;
+  --primary-4: 57, 87, 74;
+  --primary-5: 91, 140, 121;
+  --primary-6: 143, 191, 173;
+  --primary-7: 168, 210, 194;
+  --primary-8: 190, 222, 209;
+  --primary-9: 213, 237, 226;
+  --primary-10: 236, 248, 242;
+  --link-1: 30, 46, 39;
+  --link-2: 35, 54, 46;
+  --link-3: 44, 68, 58;
+  --link-4: 57, 87, 74;
+  --link-5: 91, 140, 121;
+  --link-6: 143, 191, 173;
+  --link-7: 168, 210, 194;
+  --link-8: 190, 222, 209;
+  --link-9: 213, 237, 226;
+  --link-10: 236, 248, 242;
+  --success-6: 111, 191, 143;
+  --warning-6: 214, 168, 74;
+  --danger-6: 224, 128, 120;
+  --color-bg-1: #181b18;
+  --color-bg-2: #181b18;
+  --color-bg-3: #181b18;
+  --color-bg-4: #181b18;
+  --color-bg-5: #181b18;
+  --color-bg-white: #202420;
+  --color-text-1: #e9eae3;
+  --color-text-2: #c9ccc3;
+  --color-text-3: #a4a89e;
+  --color-text-4: #777c73;
+  --color-border: #2e332d;
+  --color-border-1: #262b26;
+  --color-border-2: #2e332d;
+  --color-border-3: #3c423b;
+  --color-border-4: #5a6057;
+  --color-fill-1: rgba(233, 234, 227, 0.04);
+  --color-fill-2: rgba(233, 234, 227, 0.08);
+  --color-fill-3: rgba(233, 234, 227, 0.12);
+  --color-fill-4: rgba(233, 234, 227, 0.16);
+}
+
+.arco-btn,
+.arco-input-wrapper,
+.arco-select-view,
+.arco-dropdown,
+.arco-menu {
+  font-family: inherit;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small compatibility layer for pages not migrated yet. */
+.dark .bg-white {
+  background-color: rgb(var(--raised));
+}
+
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg,
+.dark .shadow-xl,
+.dark .shadow-2xl {
+  box-shadow: none;
+}
+
+@keyframes route-dash {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+.route-live {
+  stroke-dasharray: 3 3;
+  animation: route-dash 1.4s linear infinite;
 }

@@ -64,7 +64,8 @@ export default function Approvals() {
         {runs.length === 0 ? (
           <EmptyState title="没有待审批的运行" description="当流水线配置了部署前审批，进入等待时会出现在这里。" />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">运行</th>
@@ -99,6 +100,7 @@ export default function Approvals() {
               ))}
             </tbody>
           </table>
+</div>
         )}
       </Card>
 
@@ -107,7 +109,8 @@ export default function Approvals() {
         {history.length === 0 ? (
           <EmptyState title="暂无审批记录" description="通过或拒绝部署后，这里会留下审计记录。" />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">时间</th>
@@ -140,6 +143,7 @@ export default function Approvals() {
               })}
             </tbody>
           </table>
+</div>
         )}
       </Card>
       <Toast toast={toast} />

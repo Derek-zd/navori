@@ -168,7 +168,8 @@ export default function Registries() {
             action={<Button onClick={openCreate}><Plus size={16} />添加镜像仓库</Button>}
           />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">名称</th>
@@ -207,6 +208,7 @@ export default function Registries() {
               ))}
             </tbody>
           </table>
+</div>
         )}
       </Card>
 

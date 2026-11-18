@@ -86,7 +86,8 @@ export default function PipelinesDetail() {
         {runs.length === 0 ? (
           <EmptyState title="还没有运行记录" description="点击流水线列表中的「运行」触发第一次构建。" />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">编号</th>
@@ -125,6 +126,7 @@ export default function PipelinesDetail() {
               ))}
             </tbody>
           </table>
+</div>
         )}
       </Card>
       <Toast toast={toast} />

@@ -190,8 +190,8 @@ export default function RunDetail() {
             }
           />
           <div className="mb-4 flex gap-2">
-            <button onClick={() => setTab('overview')} className={"rounded-lg px-3 py-1.5 text-sm font-medium " + (tab === 'overview' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200')}>概览</button>
-            <button onClick={() => setTab('log')} className={"rounded-lg px-3 py-1.5 text-sm font-medium " + (tab === 'log' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200')}>日志</button>
+            <button onClick={() => setTab('overview')} className={"rounded-lg px-3 py-1.5 text-sm font-medium " + (tab === 'overview' ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-muted hover:text-ink')}>概览</button>
+            <button onClick={() => setTab('log')} className={"rounded-lg px-3 py-1.5 text-sm font-medium " + (tab === 'log' ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-muted hover:text-ink')}>日志</button>
           </div>
           {tab === 'overview' && (
             <>
@@ -296,16 +296,16 @@ export default function RunDetail() {
           </div>
         </div>
 
-        <div className="max-h-[480px] overflow-auto bg-slate-900 p-3 font-mono text-xs leading-relaxed text-slate-200">
+        <div className="max-h-[480px] overflow-auto bg-[#101210] p-3 font-mono text-xs leading-relaxed text-[#d5d8cf]">
           {groupedLogs.map((g) => {
             const st = run?.steps.find((s) => s.name === g.step)
             if (onlyFailed && st && st.status !== 'failed' && st.status !== 'rejected' && st.status !== 'error') return null
             const isCollapsed = collapsed[g.step]
             return (
-              <div key={g.step} id={'log-' + g.step} className="mb-2 rounded bg-slate-800/40">
+              <div key={g.step} id={'log-' + g.step} className="mb-2 rounded bg-white/[0.04]">
                 <button
                   onClick={() => toggleStep(g.step)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-300 hover:text-white"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#a4a89e] hover:text-white"
                 >
                   {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                   <span className="font-semibold">[{g.step}]</span>
@@ -327,7 +327,7 @@ export default function RunDetail() {
               </div>
             )
           })}
-          {logs.length === 0 ? <span className="text-slate-500">（暂无日志输出）</span> : null}
+          {logs.length === 0 ? <span className="text-[#777c73]">（暂无日志输出）</span> : null}
           <div ref={endRef} />
         </div>
       </Card>

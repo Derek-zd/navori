@@ -129,7 +129,8 @@ export default function Agents() {
             action={<Button onClick={openCreate}><Plus size={16} />添加执行器</Button>}
           />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">名称</th>
@@ -146,12 +147,12 @@ export default function Agents() {
                 <tr key={a.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
                   <td className="px-4 py-3 font-medium text-slate-900">{a.name}</td>
                   <td className="px-4 py-3"><Status value={a.status} /></td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-600">{a.labels || '—'}</td>
+                  <td className="max-w-[220px] truncate px-4 py-3 font-mono text-xs text-slate-600">{a.labels || '—'}</td>
                   <td className="px-4 py-3 text-slate-500">{a.version || '—'}</td>
                   <td className="px-4 py-3 text-slate-500">{fmtTime(a.lastSeenAt)}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{a.hostname || '—'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1.5">
+                    <div className="flex justify-end gap-1.5 whitespace-nowrap">
                       <Button variant="ghost" onClick={() => rotate(a)}>
                         <KeyRound size={15} />
                         token
@@ -169,6 +170,7 @@ export default function Agents() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

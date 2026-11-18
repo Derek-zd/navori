@@ -184,7 +184,8 @@ export default function Settings() {
         {users.length === 0 ? (
           <EmptyState title="还没有用户" description="添加一个普通用户，用于登录和操作审批等流程。" />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">用户名</th>
@@ -209,6 +210,7 @@ export default function Settings() {
               ))}
             </tbody>
           </table>
+</div>
         )}
       </Card>
 
@@ -320,7 +322,8 @@ export default function Settings() {
             <EmptyState title="暂无审计记录" description="增删改、审批等写操作会在这里留下记录。" />
           ) : (
             <>
-              <table className="w-full text-sm">
+              <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                     <th className="px-4 py-3">时间</th>
@@ -340,6 +343,7 @@ export default function Settings() {
                   ))}
                 </tbody>
               </table>
+</div>
               {logs.length > 50 ? (
                 <div className="px-4 py-3">
                   <Button variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>{showAll ? '收起' : '显示全部'}</Button>

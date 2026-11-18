@@ -39,7 +39,8 @@ export default function DeployTargetDetail() {
         {history.length === 0 ? (
           <EmptyState title="暂无部署记录" description="该环境下还没有部署过，先跑一条带部署的流水线。" />
         ) : (
-          <table className="w-full text-sm">
+          <div className="w-full overflow-x-auto">
+<table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">编号</th>
@@ -67,6 +68,7 @@ export default function DeployTargetDetail() {
               ))}
             </tbody>
           </table>
+</div>
         )}
       </Card>
     </div>

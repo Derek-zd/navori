@@ -19,3 +19,6 @@
 
 # local session notes (never commit)
 LOCAL-NOTES.md
+
+# local npm cache used when ~/.npm is not writable
+/web/.npm-cache
