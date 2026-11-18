@@ -27,7 +27,8 @@
 
 ### v2（预留，不实现）
 
-- gRPC agent：裸机 SSH 部署目标、横向扩容（多构建节点）
+- 分布式执行 agent：裸机 SSH 部署目标、横向扩容（多构建节点）
+  - **已提前启动**：跨网络构建/部署（国外构建 + 萧山 K8s 部署）的轻量 agent 设计见 [`AGENT-DESIGN.md`](./AGENT-DESIGN.md)；协议取 HTTP 长轮询而非 gRPC，理由见该文档 §4 D2。
 - 多用户 RBAC 细化、多级审批流
 - 多实例调度（任务队列/选主）、构建多架构、通知多通道
 
@@ -60,7 +61,7 @@
     │              git        docker/podman         kubectl       通知   │
     │            (pull)      (build/push)       (set image/回滚)  (webhook)│
     │                                                                   │
-    │   SSE 实时日志     (v2) gRPC:9000 ◀── agent 注册/拉任务             │
+    │   SSE 实时日志     (v2) agent 出站拉任务/上报日志（见 AGENT-DESIGN） │
     └───────────────────────────────────────────────────────────────────┘
 
 运行时依赖：目标 git 仓库、镜像仓库、目标 K8s 集群（kubeconfig），以及一个**镜像构建器**（docker/podman，见下）。SQLite 模式无外部数据库依赖。
