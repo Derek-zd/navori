@@ -348,6 +348,7 @@ engine            DB                agent-overseas        agent-xiaoshan
 - 名称 `navori-agent`，`CGO_ENABLED=0` 静态编译，linux/amd64 + arm64；
 - 构建：`go build -o navori-agent ./cmd/agent`（与 server 同一 repo，共享 `internal/runner`）；
 - 前置依赖（宿主机安装）：`git`、`docker` 或 `podman`、`kubectl`（仅部署型 agent 需要）。
+- 启动自检：`navori-agent -check -config ...` 检查工作目录和工具；`-version` 输出版本。systemd 示例见 `examples/navori-agent.service`。
 - **本期落地形态（已确认）**：构建机 = 一台物理服务器，宿主机已装 Docker，agent 以 systemd 常驻并**直接使用宿主 Docker**（镜像层缓存留在该机，重复构建才有加速）；部署机 = 萧山机房一台能执行 kubectl 的机器。容器形态不在本期。
 
 ### 11.2 配置
@@ -358,11 +359,12 @@ engine            DB                agent-overseas        agent-xiaoshan
 NAVORI_URL=https://navori.example.com
 AGENT_TOKEN=<创建时显示的一次性 token>
 AGENT_NAME=overseas-build-1
-AGENT_LABELS=role=build,region=overseas
 AGENT_WORKDIR=/var/lib/navori-agent
 AGENT_CONCURRENCY=1
 AGENT_INSECURE_SKIP_VERIFY=false
 ```
+
+标签由「执行器」页面登记（server 为准），本文件不配置 `AGENT_LABELS`；`AGENT_NAME` / `AGENT_TOKEN` 每台唯一。
 
 ### 11.3 运行
 

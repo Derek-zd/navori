@@ -1,0 +1,20 @@
+[Unit]
+Description=Navori distributed execution agent
+Documentation=https://github.com/your-org/navori
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=navori
+Group=navori
+WorkingDirectory=/var/lib/navori-agent
+EnvironmentFile=-/etc/navori/navori-agent.env
+ExecStart=/usr/local/bin/navori-agent -config /etc/navori/navori-agent.env
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

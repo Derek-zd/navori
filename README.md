@@ -106,6 +106,31 @@ cp examples/navori-agent.env.example navori-agent.env
 ./navori-agent -config navori-agent.env
 ```
 
+启动前可以先做一次本地自检（只检查工作目录和 git/docker/podman/kubectl，不连接 server）：
+
+```bash
+./navori-agent -version
+./navori-agent -check -config navori-agent.env
+```
+
+生产环境用 systemd 常驻（示例：[examples/navori-agent.service](examples/navori-agent.service)）：
+
+```bash
+sudo useradd --system --home /var/lib/navori-agent --shell /usr/sbin/nologin navori
+sudo install -d -o navori -g navori /var/lib/navori-agent /etc/navori
+sudo install -m 0600 -o navori -g navori navori-agent.env /etc/navori/navori-agent.env
+sudo install -m 0755 navori-agent /usr/local/bin/navori-agent
+sudo install -m 0644 examples/navori-agent.service /etc/systemd/system/navori-agent.service
+# 如果使用 Docker，把 navori 加入 docker 组（或改用 podman 并配置对应 socket 权限）
+sudo usermod -aG docker navori
+sudo systemctl daemon-reload
+sudo systemctl enable --now navori-agent
+sudo journalctl -u navori-agent -f
+```
+
+`-check` 缺失工具时只打印警告并返回 0，因为同一份二进制可能只承担构建或只承担部署；
+实际派发由执行器标签和流水线 selector 决定。
+
 所有 agent 使用同一个二进制和同一套配置模板，但 `AGENT_NAME` 与 `AGENT_TOKEN` 必须每台唯一；
 标签在「执行器」页面维护（server 为准，agent 上报的 `AGENT_LABELS` 不会覆盖登记值）。能执行什么由
 机器上实际安装的工具决定：构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl。

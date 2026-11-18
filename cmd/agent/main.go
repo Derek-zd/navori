@@ -53,11 +53,27 @@ type client struct {
 
 func main() {
 	configFlag := flag.String("config", "", "path to agent config (.env style, KEY=VALUE); default ./navori-agent.env")
+	checkFlag := flag.Bool("check", false, "check config and local tools, then exit")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("navori-agent %s\n", agentVersion)
+		return
+	}
 
 	cfg, err := loadConfig(*configFlag)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	if *checkFlag {
+		if err := runPreflight(cfg, os.Stdout, true); err != nil {
+			log.Fatalf("preflight: %v", err)
+		}
+		return
+	}
+	if err := runPreflight(cfg, os.Stderr, false); err != nil {
+		log.Fatalf("preflight: %v", err)
 	}
 	c := newClient(cfg)
 
