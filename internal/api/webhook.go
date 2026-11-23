@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -35,7 +36,14 @@ func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 	branch := stripRef(ref)
 	config, matched := s.resolveForBranch(pipeline, repo, branch)
 	if !matched {
-		ok(w, map[string]interface{}{"skipped": true, "reason": "branch not matched"})
+		log.Printf("webhook: pipeline %d ref=%q branch=%q commit=%s skipped: branch not matched", pipeline.ID, ref, branch, shortCommit(commit))
+		ok(w, map[string]interface{}{
+			"skipped":    true,
+			"reason":     "branch not matched",
+			"pipelineId": pipeline.ID,
+			"ref":        ref,
+			"branch":     branch,
+		})
 		return
 	}
 
@@ -45,9 +53,18 @@ func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if skipped {
-		ok(w, map[string]interface{}{"skipped": true, "reason": "duplicate commit"})
+		log.Printf("webhook: pipeline %d ref=%q branch=%q commit=%s skipped: duplicate commit", pipeline.ID, ref, branch, shortCommit(commit))
+		ok(w, map[string]interface{}{
+			"skipped":    true,
+			"reason":     "duplicate commit",
+			"pipelineId": pipeline.ID,
+			"ref":        ref,
+			"branch":     branch,
+			"commit":     commit,
+		})
 		return
 	}
+	log.Printf("webhook: pipeline %d ref=%q branch=%q commit=%s accepted run=#%d", pipeline.ID, ref, branch, shortCommit(commit), run.Number)
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"data": map[string]interface{}{"runId": run.ID, "number": run.Number}})
 }
 

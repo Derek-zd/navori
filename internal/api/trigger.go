@@ -162,10 +162,34 @@ func (s *Server) triggerWebhook(p *store.Pipeline, repo *store.Repository, ref, 
 	digest := strconv.FormatUint(uint64(p.ID), 10) + ":" + commit
 	ev := store.WebhookEvent{PipelineID: p.ID, PayloadDigest: digest}
 	if err := s.DB.DB.Create(&ev).Error; err != nil {
-		return nil, true, nil
+		// A duplicate is only a skip when a webhook run for this commit was
+		// actually created. Older builds left the event behind when trigger
+		// failed, which poisoned every retry with a bogus "duplicate commit".
+		var existing store.WebhookEvent
+		if findErr := s.DB.DB.Where("payload_digest = ?", digest).First(&existing).Error; findErr != nil {
+			return nil, false, err
+		}
+		var delivered int64
+		if countErr := s.DB.DB.Model(&store.Run{}).
+			Where("pipeline_id = ? AND runs.`commit` = ? AND trigger_type = ?", p.ID, commit, "webhook").
+			Count(&delivered).Error; countErr != nil {
+			return nil, false, countErr
+		}
+		if delivered > 0 {
+			return nil, true, nil
+		}
+		if delErr := s.DB.DB.Delete(&existing).Error; delErr != nil {
+			return nil, false, delErr
+		}
 	}
 	run, err := s.trigger(p, repo, "webhook", ref, branch, commit, config)
-	return run, false, err
+	if err != nil {
+		// The event exists only to deduplicate a delivered run. If starting
+		// the run failed, remove it so the provider's retry can succeed.
+		_ = s.DB.DB.Delete(&ev).Error
+		return nil, false, err
+	}
+	return run, false, nil
 }
 
 func (s *Server) doScan(repo *store.Repository) {

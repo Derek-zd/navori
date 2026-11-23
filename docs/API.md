@@ -13,6 +13,7 @@
 | 2026-08-13 | 初稿 |
 | 2026-09-07 | 新增 §13.1 存储管理（用量/清理/策略）；`POST /api/system/storage/cleanup` 增加 `reclaimed` 字段，deep 语义修正为 `rm -af` + `--external` |
 | 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端；P3：claim/日志/结果/租约/取消）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
+| 2026-11-23 | Webhook 明确成功 202 / 跳过 200 并返回 `reason`、`branch`；执行器 selector 支持 `agent=<id>` |
 
 ---
 
@@ -63,7 +64,6 @@
 | E_FORBIDDEN | 403 | 权限不足 |
 | E_VALIDATION | 400 | 参数校验失败 |
 | E_CONFLICT | 409 | 唯一性冲突（同名等） |
-| E_DUP_COMMIT | 200 | 同 commit 已跑过（webhook 去重，非错误，标记 skipped） |
 | E_INVALID_TAG | 400 | tag 模板渲染结果非法 |
 | E_CONNECT_FAILED | 400 | registry / kubeconfig 连通性失败 |
 | E_RUN_STATE | 409 | run 状态不允许该操作（如非 awaiting_approval 时审批） |
@@ -255,9 +255,10 @@ POST /api/webhooks
 - 通用格式 body: { ref: "refs/heads/main", commit: "sha", repoUrl: "..." }
 - GitLab push 格式：解析 object_kind=push、ref、checkout_sha、repository.git_http_url
 - 路由：repoUrl 归一化 → 匹配 pipeline
-- 去重：commit 落 webhook_events；同 sha 重复 → 200 + E_DUP_COMMIT（标记 skipped）
+- 去重：成功后 commit 落 webhook_events；同 sha 重复 → 200 + `{ data: { skipped: true, reason: "duplicate commit", ... } }`
+- 分支规则不匹配（含 tag push、规则为空且不是默认分支）→ 200 + `{ data: { skipped: true, reason: "branch not matched", pipelineId, ref, branch } }`
 - 未匹配到 pipeline → E_NOT_FOUND
-- 响应：200 { data: { runId?, skipped? } }
+- 响应：成功创建运行 → 202 `{ data: { runId, number } }`；跳过 → 200 `{ data: { skipped: true, reason, ... } }`
 
 ---
 
