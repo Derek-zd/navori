@@ -231,12 +231,13 @@ pending ──(engine 到达该步)──▶ queued ──(agent claim)──▶
 
 ```json
 "execution": {
-  "buildAgent":  "role=build,region=overseas",
-  "deployAgent": "role=deploy,site=xiaoshan"
+  "buildAgent": "role=build,region=overseas"
 }
 ```
 
-映射：`pull`/`build`/`push` → `buildAgent`；`deploy` → `deployAgent`；`approve` → 本地；字段为空 → 本地。保存时若表达式匹配不到在线 agent，仅**警告**不阻断（agent 可能稍后上线）。
+映射：`pull`/`build`/`push` → `buildAgent`；`approve` → 本地；字段为空 → 本地。
+`deploy` 的执行器不再放在流水线，而是由部署环境的 `DeployTarget.agentId` 派生（0 = 本机）；
+这样内网 kubeconfig 与能访问它的机器绑定在一起，多条流水线复用同一部署环境时不会重复配置。
 
 ## 7. 执行器重构（`internal/runner`）
 
@@ -573,7 +574,7 @@ curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' https://<navori-domain>/
 
 1. 物理构建机：装 agent（systemd），labels `role=build,region=overseas`；宿主机 Docker 已就绪。
 2. 萧山机器：装 agent，labels `role=deploy,site=xiaoshan`；kubectl + kubeconfig 就绪。
-3. 流水线 `execution.buildAgent` / `execution.deployAgent` 填 selector，跑真实 run。
+3. 流水线 `execution.buildAgent` 填 selector；部署环境绑定 `xs-deploy`，跑真实 run。
 
 **验收**：镜像推进仓库；萧山 Deployment 镜像更新且 rollout 成功；UI 日志完整；断网重连后任务不丢。
 

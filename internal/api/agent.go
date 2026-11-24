@@ -166,7 +166,16 @@ func (s *Server) agentClaim(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
 	deadline := time.Now().Add(time.Duration(agentx.DefaultClaimWaitSeconds) * time.Second)
 	for {
-		job, found, err := s.claimStep(a)
+		job, found, err := s.claimCheck(a)
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
+			return
+		}
+		if found {
+			writeJSON(w, http.StatusOK, job)
+			return
+		}
+		job, found, err = s.claimStep(a)
 		if err != nil {
 			fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 			return

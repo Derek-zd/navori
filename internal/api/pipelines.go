@@ -272,8 +272,7 @@ func randomHex(n int) (string, error) {
 func validateExecution(cfg map[string]interface{}) error {
 	rc := parseResolvedConfig(cfg)
 	for name, sel := range map[string]string{
-		"execution.buildAgent":  rc.Execution.BuildAgent,
-		"execution.deployAgent": rc.Execution.DeployAgent,
+		"execution.buildAgent": rc.Execution.BuildAgent,
 	} {
 		if sel == "" {
 			continue

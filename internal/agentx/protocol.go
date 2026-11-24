@@ -71,6 +71,7 @@ type HeartbeatResp struct {
 // Job is one step handed to an agent. JobID is the steps.id.
 type Job struct {
 	JobID        uint            `json:"jobId"`
+	Kind         string          `json:"kind,omitempty"` // empty/step | deploy-check
 	RunID        uint            `json:"runId"`
 	StepOrder    int             `json:"stepOrder"`
 	StepName     string          `json:"stepName"`
@@ -124,6 +125,19 @@ type DeployParams struct {
 	Container      string `json:"container"`
 	Image          string `json:"image"`
 	TimeoutSeconds int    `json:"timeoutSeconds"`
+}
+
+// DeployCheckParams is a one-off kubectl connectivity check.
+type DeployCheckParams struct {
+	Kubeconfig     string `json:"kubeconfig"`
+	Namespace      string `json:"namespace,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// CheckResultReq is the agent result for a one-off check.
+type CheckResultReq struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 // LogChunk is a batch of log lines for one step.

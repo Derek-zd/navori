@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"navori/internal/agentx"
 	"navori/internal/gitx"
 	"navori/internal/rules"
 	"navori/internal/store"
@@ -115,6 +117,11 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	if err := validateExecution(config); err != nil {
 		return nil, err
 	}
+	rc := parseResolvedConfig(config)
+	deployAgentID, err := s.deployAgentForConfig(rc)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now()
 	cfgJSON, _ := json.Marshal(config)
@@ -131,7 +138,6 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	if err := s.DB.DB.Create(&run).Error; err != nil {
 		return nil, err
 	}
-	rc := parseResolvedConfig(config)
 	stepNames := []string{"pull", "build", "push"}
 	if rc.Deploy.TargetID != 0 || rc.Deploy.Name != "" {
 		if rc.Deploy.Approval {
@@ -145,7 +151,9 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 		case "pull", "build", "push":
 			selector = rc.Execution.BuildAgent
 		case "deploy":
-			selector = rc.Execution.DeployAgent
+			if deployAgentID > 0 {
+				selector = agentx.AgentSelector(deployAgentID)
+			}
 		}
 		step := store.Step{RunID: run.ID, StepOrder: i + 1, Name: name, Status: "pending", AgentSelector: selector}
 		if err := s.DB.DB.Create(&step).Error; err != nil {
@@ -159,6 +167,37 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	}()
 	s.gcRuns(p.ID, s.Cfg.RunRetention)
 	return &run, nil
+}
+
+// deployAgentForConfig resolves the executor bound to the pipeline's deploy
+// target. A missing or disabled bound agent fails the trigger instead of
+// silently falling back to the server, which would be wrong for a private
+// cluster that only the agent can reach.
+func (s *Server) deployAgentForConfig(rc resolvedConfig) (uint, error) {
+	if rc.Deploy.TargetID == 0 && rc.Deploy.Name == "" {
+		return 0, nil
+	}
+	var dt store.DeployTarget
+	q := s.DB.DB
+	if rc.Deploy.TargetID > 0 {
+		q = q.Where("id = ?", rc.Deploy.TargetID)
+	} else {
+		q = q.Where("name = ?", rc.Deploy.Name)
+	}
+	if err := q.First(&dt).Error; err != nil {
+		return 0, fmt.Errorf("deploy target %q not found", rc.Deploy.Name)
+	}
+	if dt.AgentID == 0 {
+		return 0, nil
+	}
+	var a store.Agent
+	if err := s.DB.DB.First(&a, dt.AgentID).Error; err != nil {
+		return 0, fmt.Errorf("deploy target %q is bound to a missing agent", dt.Name)
+	}
+	if a.Status == "disabled" {
+		return 0, fmt.Errorf("deploy target %q is bound to disabled agent %q", dt.Name, a.Name)
+	}
+	return a.ID, nil
 }
 
 // triggerWebhook creates a run unless the commit was already processed (dedup).

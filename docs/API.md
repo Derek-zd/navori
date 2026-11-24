@@ -15,6 +15,7 @@
 | 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端；P3：claim/日志/结果/租约/取消）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
 | 2026-11-23 | Webhook 明确成功 202 / 跳过 200 并返回 `reason`、`branch`；执行器 selector 支持 `agent=<id>` |
 | 2026-11-24 | 通知通道新增 `systemAlerts`；新增 §11.2 执行器上线/离线告警事件 |
+| 2026-11-24 | 部署目标新增 `agentId` 绑定执行器；部署步骤由目标自动派生执行器，流水线移除 `execution.deployAgent`；`POST /api/deploy-targets/{id}/test` 支持经绑定 agent 远程测试 |
 
 ---
 
@@ -146,15 +147,19 @@ Registry = { id, name, url, username, passwordSet, namespace, insecureSkipTls, i
 
 GET /api/deploy-targets → 200 { data: [DeployTarget] }
 POST /api/deploy-targets
-    body: { name, type: "k8s", kubeconfig?, defaultNamespace?, isDefault? }  // type=ssh 为 v2 预留
+    body: { name, type: "k8s", kubeconfig?, defaultNamespace?, isDefault?, agentId? }  // type=ssh 为 v2 预留
     → 201 { data: DeployTarget }
+    agentId 为绑定的执行器 id；0/省略 = 服务端本机。绑定不要求 agent 在线，但触发部署时必须可用。
 GET /api/deploy-targets/{id} → 200 { data: DeployTarget }
 PATCH /api/deploy-targets/{id} → 200 { data: DeployTarget }
 DELETE /api/deploy-targets/{id} → 200 { data: {} }
 POST /api/deploy-targets/{id}/test
-    → 200 { data: { ok: true } } 或 E_CONNECT_FAILED
+    → 200 { data: { ok: true, via: "agent" | "server", agentName? } } 或 E_CONNECT_FAILED
+    未绑定 agent 时服务端本机执行 kubectl；已绑定则由该 agent 执行一次性 kubectl 检查，
+    最长等待 35s。agent 离线/不存在时直接失败，不会回退本机。
 
-DeployTarget = { id, name, type, defaultNamespace, kubeconfigSet, isDefault }
+DeployTarget = { id, name, type, defaultNamespace, kubeconfigSet, isDefault,
+                 agentId, agentName?, agentStatus? }  // agentName/agentStatus 仅绑定后返回
 
 ---
 
@@ -195,9 +200,10 @@ PipelineConfig（defaults）= {
     approval: bool, approvers: [username]   // 空 = 任意 admin
   },
   execution: {                             // v2 分布式执行；空 = 本机执行
-    buildAgent: "role=build,region=overseas",  // pull/build/push 的 selector；也可写 agent=<id> 精确指定
-    deployAgent: "role=deploy"                 // deploy 的 selector；agent=<id> 为保留键，approve 永远本机
+    buildAgent: "role=build,region=overseas"   // pull/build/push 的 selector；也可写 agent=<id> 精确指定
   }
+  // deploy 的执行器不在流水线配置：由 deploy.targetId 对应 DeployTarget.agentId 派生；
+  // 未绑定时服务端本机执行；agent 不存在/禁用时触发失败。approve 永远在服务端。
 }
 
 BranchRule = { branch: glob, overrides: Partial<PipelineConfig> }  // 浅合并覆盖 defaults；顺序敏感
@@ -366,8 +372,8 @@ POST /api/agents
     body: { name, labels? }           // name 是执行器身份/显示名，≤64 字节
     → 201 { data: { agent: Agent, token: "<一次性 token>" } }
     token 只在此响应出现；labels 由服务端登记并用于路由，agent 上报的 labels 不参与路由。
-    执行器页面的「构建/部署」开关会写入 build=true / deploy=true；一台 agent 可同时具备两类能力，
-    流水线分别用 build=true / deploy=true 作为 selector 选择。
+    执行器页面的「构建/部署」开关会写入 build=true / deploy=true；一台 agent 可同时具备两类能力。
+    流水线构建执行器可用 build=true 选择；部署执行器不在流水线选择，而是由部署环境的 agentId 绑定。
 
 PATCH /api/agents/{id}
     body: { labels?, disabled? }      // 只更新给出的字段
@@ -403,15 +409,17 @@ POST /api/agent/jobs/claim
     抢占使用条件 UPDATE，并发 claim 只有一个成功。payload 中的凭据已解密。
 
 Job = {
-  jobId, runId, stepOrder, stepName,     // jobId == steps.id
-  leaseSeconds: 120, deadline, imageTag,
-  params: PullParams | BuildParams | PushParams | DeployParams
+  jobId, runId, stepOrder, stepName,     // 步骤 jobId == steps.id；check jobId == agent_checks.id
+  kind?: "deploy-check",                 // 省略/空 = 普通步骤
+  leaseSeconds, deadline, imageTag,
+  params: PullParams | BuildParams | PushParams | DeployParams | DeployCheckParams
 }
 PullParams   = { gitUrl, branch, dir }                 // dir 相对 AGENT_WORKDIR
 BuildParams  = { dir, dockerfile, context, args, platform }
 PushParams   = { image, registryUrl, username, password, insecureSkipTls }
 DeployParams = { kubeconfig(base64), kind, name, namespace, container, image,
                  timeoutSeconds }                       // kubeconfig 解码后 <100KB
+DeployCheckParams = { kubeconfig, namespace?, timeoutSeconds? }  // deploy-check 专用
 
 POST /api/agent/jobs/{id}/log
     body: { seq, lines: [string] }
@@ -425,6 +433,12 @@ POST /api/agent/jobs/{id}/result
     → 200 { ok: true } | { ok: true, ignored: true }
     仅允许把 queued/running 且属于该 agent 的步骤改为终态；已终态返回 ignored，
     重复上报不会覆盖结果（幂等）。failed 的 error 会写入 run.error 并唤醒引擎。
+
+POST /api/agent/checks/{id}/result
+    body: { ok: bool, error? }
+    → 200 { ok: true } | { ok: true, ignored: true }
+    一次性部署连通性测试的结果；只允许创建该 check 的 agent 上报，终态幂等。
+    deploy-check 不进入 run/steps 历史，也不占用步骤租约。
 
 租约与重试：心跳/日志续租 120s；janitor 每 15s 检查过期 running 步骤，
 attempt+1 后重新置 queued（最多重试 2 次），仍失联则 failed 并唤醒引擎。

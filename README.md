@@ -86,16 +86,16 @@ K8s 部署（MySQL + Secret 注入密钥）直接用模板：[examples/k8s/navor
 
 ## 分布式执行（可选）
 
-默认所有步骤在本机执行。需要跨网络构建/部署时，可在「执行器」页登记 agent，并把流水线的
-`execution.buildAgent` / `execution.deployAgent` 设为 label selector。
+默认所有步骤在本机执行。需要跨网络构建/部署时，可在「执行器」页登记 agent。
 
-执行器页面用「可以执行构建 / 可以执行部署」两个开关设置能力，分别写入 `build=true` / `deploy=true`
-标签；流水线的构建 selector 填 `build=true`，部署 selector 填 `deploy=true`。一台机器可以同时勾选两类，
-两个 selector 分别指向这两个标签即可。已有的 `role=build` / `role=deploy` 标签仍可继续使用。
+- **构建执行器**：在流水线的「构建与推送」里选择，保存为 `execution.buildAgent`；留空 = server 本机。
+- **部署执行器**：不再在流水线里选，而是在「部署环境」里绑定；deploy 步骤自动使用该环境的执行器。
+  内网集群的 kubeconfig 只有对应机器能访问，绑定后测试连接和实际部署都走同一台 agent。
+- 一台 agent 可以同时具备构建与部署能力；部署环境未绑定 agent 时由 server 本机执行。
+- 构建执行器留空、部署环境未绑定 agent 时，行为与旧版本完全一致。
+- 一旦选了执行器/绑定了 agent，但该 agent 离线，步骤会保持排队直到超时，不会自动回退本机。
 
-pull/build/push 走构建执行器，deploy 走部署执行器，审批始终留在 server。
-如果两个 selector 都留空，步骤仍由 server 本机执行；一旦填了 selector 但没有匹配的在线执行器，
-步骤会保持排队直到超时，不会自动回退本机。
+pull/build/push 走构建执行器，deploy 走部署环境绑定的执行器，审批始终留在 server。
 
 构建 agent 二进制：
 

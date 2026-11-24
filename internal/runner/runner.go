@@ -190,3 +190,8 @@ func writeTempKubeconfig(content string) (string, error) {
 	}
 	return f.Name(), nil
 }
+
+// CheckDeploy verifies kubectl connectivity with the supplied kubeconfig.
+func CheckDeploy(ctx context.Context, kubeconfig, namespace string) error {
+	return deploy.Check(ctx, kubeconfig, namespace)
+}

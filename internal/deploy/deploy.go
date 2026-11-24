@@ -2,7 +2,9 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -105,4 +107,36 @@ func buildArgs(kubeconfig string, args ...string) []string {
 	}
 	full := []string{"--kubeconfig", kubeconfig}
 	return append(full, args...)
+}
+
+// Check verifies that the kubeconfig can reach the cluster. It writes the
+// kubeconfig to a 0600 temporary file and removes it immediately afterwards.
+func Check(ctx context.Context, kubeconfig, namespace string) error {
+	if strings.TrimSpace(kubeconfig) == "" {
+		return fmt.Errorf("kubeconfig is empty")
+	}
+	f, err := os.CreateTemp("", "navori-check-*.yaml")
+	if err != nil {
+		return err
+	}
+	path := f.Name()
+	defer os.Remove(path)
+	if _, err := f.WriteString(kubeconfig); err != nil {
+		f.Close()
+		return err
+	}
+	f.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	args := []string{"get", "namespaces", "--request-timeout=10s"}
+	if strings.TrimSpace(namespace) != "" {
+		args = []string{"get", "namespace", namespace, "--request-timeout=10s"}
+	}
+	cmd := proc.CommandContext(ctx, "kubectl", buildArgs(path, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kubectl %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return nil
 }

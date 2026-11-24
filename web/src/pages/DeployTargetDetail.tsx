@@ -34,9 +34,10 @@ export default function DeployTargetDetail() {
   async function test() {
     setTesting(true)
     try {
-      await api('/api/deploy-targets/' + id + '/test', { method: 'POST' })
+      const r = await api<{ via?: string; agentName?: string }>('/api/deploy-targets/' + id + '/test', { method: 'POST' })
       setTestState('success')
-      setToast({ type: 'success', text: '连通正常' })
+      const who = r.via === 'agent' && r.agentName ? `（由 ${r.agentName} 测试）` : '（服务端本机测试）'
+      setToast({ type: 'success', text: '连通正常 ' + who })
     } catch (e) {
       setTestState('error')
       setToast({ type: 'error', text: e instanceof Error ? e.message : '连接失败' })
@@ -84,12 +85,12 @@ export default function DeployTargetDetail() {
         {[
           { label: '类型', value: typeLabel(dt.type || 'k8s'), mono: false },
           { label: '默认命名空间', value: dt.defaultNamespace || 'default', mono: true },
-          { label: 'kubeconfig', value: dt.kubeconfigSet ? '已设置' : '未设置', mono: false, danger: !dt.kubeconfigSet },
+          { label: '执行器', value: dt.agentId ? (dt.agentName || '执行器 #' + dt.agentId) : '服务端本机', mono: false, note: dt.agentId ? (dt.agentStatus === 'online' ? '在线' : dt.agentStatus === 'disabled' ? '已禁用' : '离线') : '未绑定 agent' },
           { label: '最近部署', value: last ? '#' + last.number : '—', mono: false, note: last ? timeAgo(last.finishedAt) : '暂无记录' },
         ].map((s) => (
           <div key={s.label} className="bg-surface px-4 py-3.5 sm:px-5">
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-faint">{s.label}</div>
-            <div className={'mt-1.5 truncate text-sm font-semibold ' + (s.danger ? 'text-danger' : s.mono ? 'font-mono text-xs text-ink' : 'text-ink')}>{s.value}</div>
+            <div className={'mt-1.5 truncate text-sm font-semibold ' + (s.mono ? 'font-mono text-xs text-ink' : 'text-ink')}>{s.value}</div>
             {s.note ? <div className="mt-0.5 text-[10px] text-faint">{s.note}</div> : null}
           </div>
         ))}
@@ -104,6 +105,11 @@ export default function DeployTargetDetail() {
         <span className="inline-flex items-center gap-1.5">
           <Server size={13} className="text-faint" />
           最近测试 {dt.lastTestAt ? formatDateTime(dt.lastTestAt) : '从未测试'}
+        </span>
+        <span className="h-3 w-px bg-line" />
+        <span className="inline-flex items-center gap-1.5">
+          <Server size={13} className="text-faint" />
+          {dt.agentId ? (dt.agentName || '执行器 #' + dt.agentId) : '服务端本机'}
         </span>
         <span className="h-3 w-px bg-line" />
         <span className="inline-flex items-center gap-1.5">

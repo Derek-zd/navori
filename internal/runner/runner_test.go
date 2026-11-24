@@ -224,3 +224,22 @@ func TestPullClonesThenFastForwards(t *testing.T) {
 		t.Fatalf("app.txt after pull = %q", b)
 	}
 }
+
+func TestCheckDeployUsesKubeconfigAndNamespace(t *testing.T) {
+	_, calls := fakeCommand(t, "kubectl", `
+echo "ARGS:$@" >> "$LOG"
+if [ "$1" = "--kubeconfig" ]; then echo "CFG:$(cat "$2")" >> "$LOG"; fi
+exit 0
+`)
+	if err := CheckDeploy(context.Background(), "apiVersion: v1\nkind: Config\n", "apps"); err != nil {
+		t.Fatalf("CheckDeploy: %v", err)
+	}
+	logged, _ := os.ReadFile(calls)
+	text := string(logged)
+	if !strings.Contains(text, "--kubeconfig") || !strings.Contains(text, "get namespace apps --request-timeout=10s") {
+		t.Fatalf("unexpected kubectl call:\n%s", text)
+	}
+	if !strings.Contains(text, "kind: Config") {
+		t.Fatalf("kubeconfig content not written:\n%s", text)
+	}
+}

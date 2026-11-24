@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Play, Square } from 'lucide-react'
 import { api } from '../lib/api'
-import type { Agent, Pipeline, Repository, Run, Step } from '../lib/types'
+import type { Agent, DeployTarget, Pipeline, Repository, Run, Step } from '../lib/types'
 import { StageRail, type Stage } from '../components/StageRail'
 import { Button, Card, EmptyState, PageHeader, Status, Toast, useToast } from '../components/ui'
 import { formatDateTime, formatDuration, timeAgo } from '../lib/format'
@@ -21,6 +21,7 @@ export default function PipelinesDetail() {
   const [repo, setRepo] = useState<Repository | null>(null)
   const [runs, setRuns] = useState<Run[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [deployTargets, setDeployTargets] = useState<DeployTarget[]>([])
   const [starting, setStarting] = useState(false)
   const { toast, setToast } = useToast()
 
@@ -48,6 +49,7 @@ export default function PipelinesDetail() {
       })
       .catch(() => {})
     api<Agent[]>('/api/agents').then(setAgents).catch(() => {})
+    api<DeployTarget[]>('/api/deploy-targets').then(setDeployTargets).catch(() => {})
   }, [id])
 
   useEffect(() => {
@@ -98,14 +100,16 @@ export default function PipelinesDetail() {
   }
   const approval = Boolean(deploy.approval)
   const hasDeploy = Boolean(deploy.name)
+  const deployTarget = deployTargets.find((t) => t.id === Number(deploy.targetId || 0))
+  const deployAgentName = deployTarget ? (deployTarget.agentName || '服务端本机') : '未配置'
 
   const stages = useMemo<Stage[]>(() => {
     const byName = new Map<string, Step>((latest?.steps || []).map((s) => [s.name, s]))
     return STAGES.map(({ key, label }) => {
       const step = byName.get(key)
       let status = step?.status || 'pending'
-      const selected = key === 'deploy' ? exec.deployAgent : key === 'approve' ? '' : exec.buildAgent
-      let note = step?.agentName || (key === 'approve' ? '服务端' : executionName(selected))
+      const selected = key === 'approve' ? '' : exec.buildAgent
+      let note = step?.agentName || (key === 'approve' ? '服务端' : key === 'deploy' ? deployAgentName : executionName(selected))
       if (key === 'approve' && !approval) {
         status = 'skipped'
         note = '未启用'
@@ -117,7 +121,7 @@ export default function PipelinesDetail() {
       if (!latest && key !== 'approve' && key !== 'deploy') note = '尚未运行'
       return { key, label, status, note }
     })
-  }, [latest, approval, hasDeploy, exec.buildAgent, exec.deployAgent, agents])
+  }, [latest, approval, hasDeploy, exec.buildAgent, agents, deployAgentName])
 
   if (!pipeline) {
     return <p className="text-sm text-muted">加载中…</p>
@@ -157,7 +161,7 @@ export default function PipelinesDetail() {
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-faint">
             <span>构建 <span className="text-muted">{executionName(exec.buildAgent)}</span></span>
-            <span>部署 <span className="text-muted">{executionName(exec.deployAgent)}</span></span>
+            <span>部署 <span className="text-muted">{deployAgentName}</span></span>
             <Link to="/agents" className="text-brand hover:underline">管理执行器</Link>
           </div>
         </div>
@@ -282,6 +286,7 @@ export default function PipelinesDetail() {
               <div className="flex justify-between gap-3"><dt className="text-faint">镜像名</dt><dd className="font-mono text-ink">{cfg.imageName || '—'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">Tag 模板</dt><dd className="max-w-[180px] truncate font-mono text-[11px] text-ink" title={cfg.tagTemplate}>{cfg.tagTemplate || '—'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">部署</dt><dd className="text-right text-ink">{hasDeploy ? `${deploy.kind || 'Deployment'} / ${deploy.name}` : '仅构建'}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-faint">部署执行器</dt><dd className="max-w-[170px] truncate text-right text-ink" title={deployAgentName}>{hasDeploy ? deployAgentName : '—'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">审批</dt><dd className="text-ink">{approval ? '需要' : '不需要'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">分支规则</dt><dd className="max-w-[170px] text-right font-mono text-[10px] text-ink">{(pipeline.branchRules || []).map((b) => b.branch).join(', ') || '—'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">定时</dt><dd className="font-mono text-[11px] text-ink">{pipeline.schedule || '—'}</dd></div>

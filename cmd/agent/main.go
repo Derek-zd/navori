@@ -376,6 +376,17 @@ func (c *client) reportResult(ctx context.Context, jobID uint, res agentx.Result
 	}
 }
 
+func (c *client) reportCheck(ctx context.Context, checkID uint, ok bool, msg string) {
+	status, _, err := c.post(ctx, fmt.Sprintf("/api/agent/checks/%d/result", checkID), agentx.CheckResultReq{OK: ok, Error: msg})
+	if err != nil {
+		log.Printf("report check %d: %v", checkID, err)
+		return
+	}
+	if status != http.StatusOK && status != http.StatusNoContent {
+		log.Printf("report check %d: HTTP %d", checkID, status)
+	}
+}
+
 func (c *client) post(ctx context.Context, path string, payload any) (int, []byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {

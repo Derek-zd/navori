@@ -236,7 +236,7 @@ func TestHeartbeatReturnsCancelForRequeuedStep(t *testing.T) {
 
 func TestValidateExecution(t *testing.T) {
 	valid := map[string]interface{}{
-		"execution": map[string]interface{}{"buildAgent": "role=build,region=overseas", "deployAgent": ""},
+		"execution": map[string]interface{}{"buildAgent": "role=build,region=overseas"},
 	}
 	if err := validateExecution(valid); err != nil {
 		t.Fatalf("valid selector rejected: %v", err)
@@ -246,5 +246,111 @@ func TestValidateExecution(t *testing.T) {
 		if err := validateExecution(cfg); err == nil {
 			t.Fatalf("selector %q should be rejected", bad)
 		}
+	}
+}
+
+func TestDeployAgentForConfigUsesTargetBinding(t *testing.T) {
+	s, db := newDispatchTestServer(t)
+	agent := store.Agent{Name: "xs-deploy", Labels: "deploy=true", TokenHash: "t", Status: "online"}
+	if err := db.Create(&agent).Error; err != nil {
+		t.Fatal(err)
+	}
+	dt := store.DeployTarget{Name: "xs-k8s", Type: "k8s", AgentID: agent.ID}
+	if err := db.Create(&dt).Error; err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.deployAgentForConfig(resolvedConfig{Deploy: deployConfig{TargetID: dt.ID}})
+	if err != nil || id != agent.ID {
+		t.Fatalf("bound target: id=%d err=%v", id, err)
+	}
+	// Name-only targets are supported as well.
+	id, err = s.deployAgentForConfig(resolvedConfig{Deploy: deployConfig{Name: dt.Name}})
+	if err != nil || id != agent.ID {
+		t.Fatalf("name target: id=%d err=%v", id, err)
+	}
+	// No binding means server-local execution.
+	local := store.DeployTarget{Name: "local", Type: "k8s"}
+	db.Create(&local)
+	id, err = s.deployAgentForConfig(resolvedConfig{Deploy: deployConfig{TargetID: local.ID}})
+	if err != nil || id != 0 {
+		t.Fatalf("local target: id=%d err=%v", id, err)
+	}
+	// Disabled/missing agents must fail the trigger instead of falling back.
+	db.Model(&agent).Update("status", "disabled")
+	if _, err := s.deployAgentForConfig(resolvedConfig{Deploy: deployConfig{TargetID: dt.ID}}); err == nil {
+		t.Fatal("disabled agent should reject trigger")
+	}
+	db.Delete(&agent)
+	if _, err := s.deployAgentForConfig(resolvedConfig{Deploy: deployConfig{TargetID: dt.ID}}); err == nil {
+		t.Fatal("missing agent should reject trigger")
+	}
+}
+
+func TestClaimCheckAndFinish(t *testing.T) {
+	s, db := newDispatchTestServer(t)
+	agent := store.Agent{Name: "checker", TokenHash: "t", Status: "online"}
+	db.Create(&agent)
+	dt := store.DeployTarget{Name: "cluster", Type: "k8s", AgentID: agent.ID, KubeconfigEnc: ""}
+	db.Create(&dt)
+	c := store.AgentCheck{AgentID: agent.ID, DeployTargetID: dt.ID, Status: "pending"}
+	db.Create(&c)
+
+	job, found, err := s.claimCheck(&agent)
+	if err != nil || !found || job == nil {
+		t.Fatalf("claim check: job=%v found=%v err=%v", job, found, err)
+	}
+	if job.Kind != "deploy-check" || job.JobID != c.ID || job.StepName != "deploy-check" {
+		t.Fatalf("unexpected job: %+v", job)
+	}
+	var running store.AgentCheck
+	db.First(&running, c.ID)
+	if running.Status != "running" || running.StartedAt == nil {
+		t.Fatalf("check not running: %+v", running)
+	}
+	s.finishCheck(c.ID, true, "")
+	var done store.AgentCheck
+	db.First(&done, c.ID)
+	if done.Status != "success" || done.FinishedAt == nil {
+		t.Fatalf("check not finished: %+v", done)
+	}
+	// Late/duplicate results are ignored.
+	s.finishCheck(c.ID, false, "late")
+	db.First(&done, c.ID)
+	if done.Status != "success" || done.Error != "" {
+		t.Fatalf("late result overwrote state: %+v", done)
+	}
+}
+
+func TestTriggerDeployStepUsesTargetAgent(t *testing.T) {
+	s, db := newDispatchTestServer(t)
+	repo := store.Repository{Name: "repo", GitURL: "file:///nonexistent", DefaultBranch: "main"}
+	if err := db.Create(&repo).Error; err != nil {
+		t.Fatal(err)
+	}
+	p := store.Pipeline{RepoID: repo.ID, ConfigJSON: "{}"}
+	if err := db.Create(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	agent := store.Agent{Name: "xs-deploy", TokenHash: "t", Status: "online"}
+	if err := db.Create(&agent).Error; err != nil {
+		t.Fatal(err)
+	}
+	dt := store.DeployTarget{Name: "xs-k8s", Type: "k8s", AgentID: agent.ID}
+	if err := db.Create(&dt).Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]interface{}{
+		"deploy": map[string]interface{}{"targetId": dt.ID, "name": "app", "kind": "Deployment", "namespace": "apps"},
+	}
+	run, err := s.trigger(&p, &repo, "manual", "", "main", "abcdef0", cfg)
+	if err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	var step store.Step
+	if err := db.Where("run_id = ? AND name = ?", run.ID, "deploy").First(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	if want := agentx.AgentSelector(agent.ID); step.AgentSelector != want {
+		t.Fatalf("deploy selector = %q, want %q", step.AgentSelector, want)
 	}
 }

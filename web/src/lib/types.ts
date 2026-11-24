@@ -45,6 +45,9 @@ export interface DeployTarget {
   defaultNamespace: string
   kubeconfigSet: boolean
   isDefault: boolean
+  agentId?: number
+  agentName?: string
+  agentStatus?: string
   lastTestStatus?: string
   lastTestAt?: string
   lastDeploy?: {
@@ -73,7 +76,7 @@ export interface PipelineConfig {
   buildArgs?: Record<string, string>
   platform?: string
   deploy?: DeployConfig
-  execution?: { buildAgent?: string; deployAgent?: string }
+  execution?: { buildAgent?: string }
 }
 
 export interface Variable {

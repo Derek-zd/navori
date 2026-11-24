@@ -68,7 +68,6 @@ export default function Pipelines() {
   const [deployKind, setDeployKind] = useState('Deployment')
   const [approval, setApproval] = useState(false)
   const [buildAgent, setBuildAgent] = useState('')
-  const [deployAgent, setDeployAgent] = useState('')
   const [branches, setBranches] = useState<string[]>(['**'])
   const [group, setGroup] = useState('')
   const [scheduleCron, setScheduleCron] = useState('')
@@ -128,13 +127,20 @@ export default function Pipelines() {
     return agents.find((a) => a.id === id)?.name || ('执行器 #' + id)
   }
 
-  function executionSummary(build: string, deploy: string): string {
-    if (!build && !deploy) return '服务端本机'
-    return '构建 ' + executionShort(build) + ' · 部署 ' + executionShort(deploy)
+  function deployAgentName(targetId: number): string {
+    const target = dts.find((t) => t.id === targetId)
+    if (!target) return '未配置'
+    return target.agentName || '服务端本机'
   }
 
-  function executionDetail(build: string, deploy: string): string {
-    return `构建：${build || '服务端本机'}；部署：${deploy || '服务端本机'}`
+  function executionSummary(build: string, targetId: number): string {
+    let text = '构建 ' + executionShort(build)
+    if (targetId) text += ' · 部署 ' + deployAgentName(targetId)
+    return text
+  }
+
+  function executionDetail(build: string, targetId: number): string {
+    return `构建：${build || '服务端本机'}；部署：${deployTargetName(targetId) || '未配置'} → ${deployAgentName(targetId)}`
   }
 
   function executionField(label: string, value: string, onChange: (v: string) => void, hint: string) {
@@ -220,7 +226,6 @@ export default function Pipelines() {
     setDeployKind('Deployment')
     setApproval(false)
     setBuildAgent('')
-    setDeployAgent('')
     setBranches(['**'])
     setGroup('')
     setScheduleCron('')
@@ -249,7 +254,6 @@ export default function Pipelines() {
     setApproval(Boolean(d.approval))
     const ex = (cfg.execution || {}) as Record<string, any>
     setBuildAgent(String(ex.buildAgent || ''))
-    setDeployAgent(String(ex.deployAgent || ''))
     setBranches((p.branchRules || []).map((r) => r.branch))
     setGroup(p.group || '')
     setScheduleCron(p.schedule || '')
@@ -303,7 +307,6 @@ export default function Pipelines() {
       }
       const execution: Record<string, string> = {}
       if (buildAgent.trim()) execution.buildAgent = buildAgent.trim()
-      if (deployAgent.trim()) execution.deployAgent = deployAgent.trim()
       if (Object.keys(execution).length > 0) config.execution = execution
       if (editing) {
         await api('/api/pipelines/' + editing.id, {
@@ -476,8 +479,8 @@ export default function Pipelines() {
                                   ) : (
                                     <span className="text-faint">无部署</span>
                                   )}
-                                  <div className="mt-1 truncate text-[10px] text-faint" title={executionDetail(ex.buildAgent || '', ex.deployAgent || '')}>
-                                  执行 {executionSummary(ex.buildAgent || '', ex.deployAgent || '')}
+                                  <div className="mt-1 truncate text-[10px] text-faint" title={executionDetail(ex.buildAgent || '', d.targetId || 0)}>
+                                  执行 {executionSummary(ex.buildAgent || '', d.targetId || 0)}
                                 </div>
                                 </div>
                               </td>
@@ -551,7 +554,7 @@ export default function Pipelines() {
                             <div className="mt-0.5 text-[10px] text-faint">
                               {d.name ? `${deployTargetName(d.targetId) || '未指定目标'}${d.approval ? ' · 需审批' : ''}` : '只构建与推送镜像'}
                             </div>
-                            <div className="mt-1 truncate text-[10px] text-faint">执行 {executionSummary(ex.buildAgent || '', ex.deployAgent || '')}</div>
+                            <div className="mt-1 truncate text-[10px] text-faint">执行 {executionSummary(ex.buildAgent || '', d.targetId || 0)}</div>
                           </div>
                           <div className="mt-3 flex items-center gap-1">
                             <Button variant="secondary" size="sm" onClick={() => run(p.id)}>
@@ -651,7 +654,7 @@ export default function Pipelines() {
               <Field label="部署目标">
                 <Select value={deployTargetId} onChange={(e) => setDeployTargetId(Number(e.target.value))}>
                   <option value={0}>选择部署目标…</option>
-                  {dts.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {dts.map((t) => <option key={t.id} value={t.id}>{t.name}{t.agentName ? ' · ' + t.agentName : ''}</option>)}
                 </Select>
               </Field>
               <Field label="Workload 类型">
@@ -666,9 +669,7 @@ export default function Pipelines() {
                 <Input value={deployNamespace} onChange={(e) => setDeployNamespace(e.target.value)} placeholder="default" />
               </Field>
             </div>
-            <div className="mt-4">
-              {executionField('部署执行器', deployAgent, setDeployAgent, 'deploy 由该执行器执行；未选择时由服务端本机执行。')}
-            </div>
+            <div className="mt-2 text-[11px] text-faint">部署执行器由所选部署环境绑定；未绑定执行器时由服务端本机执行。</div>
             <label className="mt-4 flex items-start gap-2 text-xs text-muted">
               <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand" />
               <span>部署前需要审批<span className="ml-1 text-faint">审批始终在服务端执行，不会下发到执行器。</span></span>

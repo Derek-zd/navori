@@ -34,6 +34,7 @@ func (s *Server) createDeployTarget(w http.ResponseWriter, r *http.Request) {
 		Kubeconfig       string
 		DefaultNamespace string
 		IsDefault        bool
+		AgentID          uint
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid body")
@@ -46,7 +47,14 @@ func (s *Server) createDeployTarget(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "k8s"
 	}
-	dt := store.DeployTarget{Name: req.Name, Type: req.Type, DefaultNamespace: req.DefaultNamespace, IsDefault: req.IsDefault}
+	if req.AgentID > 0 {
+		var a store.Agent
+		if err := s.DB.DB.First(&a, req.AgentID).Error; err != nil {
+			fail(w, http.StatusBadRequest, "E_VALIDATION", "agent not found")
+			return
+		}
+	}
+	dt := store.DeployTarget{Name: req.Name, Type: req.Type, DefaultNamespace: req.DefaultNamespace, IsDefault: req.IsDefault, AgentID: req.AgentID}
 	if req.Kubeconfig != "" {
 		enc, err := s.Sec.Encrypt(req.Kubeconfig)
 		if err != nil {
@@ -60,7 +68,7 @@ func (s *Server) createDeployTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "deploytarget.create", dt.Name)
-	created(w, deployTargetJSON(dt))
+	created(w, s.deployTargetWithLast(dt))
 }
 
 func (s *Server) getDeployTarget(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +82,7 @@ func (s *Server) getDeployTarget(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "E_NOT_FOUND", "deploy target not found")
 		return
 	}
-	ok(w, deployTargetJSON(dt))
+	ok(w, s.deployTargetWithLast(dt))
 }
 
 func (s *Server) updateDeployTarget(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +101,7 @@ func (s *Server) updateDeployTarget(w http.ResponseWriter, r *http.Request) {
 		Kubeconfig       *string
 		DefaultNamespace *string
 		IsDefault        *bool
+		AgentID          *uint
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid body")
@@ -115,12 +124,22 @@ func (s *Server) updateDeployTarget(w http.ResponseWriter, r *http.Request) {
 	if req.IsDefault != nil {
 		dt.IsDefault = *req.IsDefault
 	}
+	if req.AgentID != nil {
+		if *req.AgentID > 0 {
+			var a store.Agent
+			if err := s.DB.DB.First(&a, *req.AgentID).Error; err != nil {
+				fail(w, http.StatusBadRequest, "E_VALIDATION", "agent not found")
+				return
+			}
+		}
+		dt.AgentID = *req.AgentID
+	}
 	if err := s.DB.DB.Save(&dt).Error; err != nil {
 		fail(w, http.StatusConflict, "E_CONFLICT", err.Error())
 		return
 	}
 	s.audit(r, "deploytarget.update", dt.Name)
-	ok(w, deployTargetJSON(dt))
+	ok(w, s.deployTargetWithLast(dt))
 }
 
 func (s *Server) deleteDeployTarget(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +167,19 @@ func (s *Server) testDeployTarget(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "E_NOT_FOUND", "deploy target not found")
 		return
 	}
+	if dt.AgentID > 0 {
+		passed, msg := s.testDeployTargetViaAgent(r.Context(), &dt)
+		if !passed {
+			s.updateDeployTargetTestStatus(&dt, "error")
+			fail(w, http.StatusBadRequest, "E_CONNECT_FAILED", msg)
+			return
+		}
+		s.updateDeployTargetTestStatus(&dt, "success")
+		var a store.Agent
+		_ = s.DB.DB.First(&a, dt.AgentID).Error
+		ok(w, map[string]interface{}{"ok": true, "via": "agent", "agentName": a.Name})
+		return
+	}
 	kubeconfig := ""
 	if dt.KubeconfigEnc != "" {
 		kubeconfig, _ = s.Sec.Decrypt(dt.KubeconfigEnc)
@@ -168,7 +200,7 @@ func (s *Server) testDeployTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.updateDeployTargetTestStatus(&dt, "success")
-	ok(w, map[string]interface{}{"ok": true})
+	ok(w, map[string]interface{}{"ok": true, "via": "server"})
 }
 
 func (s *Server) updateDeployTargetTestStatus(dt *store.DeployTarget, status string) {
@@ -192,6 +224,13 @@ func writeTempKubeconfig(content string) (string, error) {
 
 func (s *Server) deployTargetWithLast(v store.DeployTarget) map[string]interface{} {
 	out := deployTargetJSON(v)
+	if v.AgentID > 0 {
+		var a store.Agent
+		if err := s.DB.DB.First(&a, v.AgentID).Error; err == nil {
+			out["agentName"] = a.Name
+			out["agentStatus"] = a.Status
+		}
+	}
 	out["lastDeploy"] = s.lastDeployFor(v.ID)
 	return out
 }
@@ -251,6 +290,7 @@ func deployTargetJSON(v store.DeployTarget) map[string]interface{} {
 		"defaultNamespace": v.DefaultNamespace,
 		"kubeconfigSet":    v.KubeconfigEnc != "",
 		"isDefault":        v.IsDefault,
+		"agentId":          v.AgentID,
 		"lastTestStatus":   v.LastTestStatus,
 		"lastTestAt":       v.LastTestAt,
 	}

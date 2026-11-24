@@ -167,6 +167,15 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "E_NOT_FOUND", "agent not found")
 		return
 	}
+	var bound int64
+	if err := s.DB.DB.Model(&store.DeployTarget{}).Where("agent_id = ?", a.ID).Count(&bound).Error; err != nil {
+		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
+		return
+	}
+	if bound > 0 {
+		fail(w, http.StatusConflict, "E_CONFLICT", "agent is bound to a deploy target; unbind it first")
+		return
+	}
 	if err := s.DB.DB.Delete(&a).Error; err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 		return

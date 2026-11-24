@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { KeyRound, Pencil, Plug, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
-import type { DeployTarget } from '../lib/types'
-import { Button, Card, Drawer, EmptyState, Field, FormSection, Input, PageHeader, Textarea, Toast, useToast } from '../components/ui'
+import type { Agent, DeployTarget } from '../lib/types'
+import { Button, Card, Drawer, EmptyState, Field, FormSection, Input, PageHeader, Select, Textarea, Toast, useToast } from '../components/ui'
 import { timeAgo } from '../lib/format'
 
 type TestStatus = 'success' | 'error'
 
 export default function DeployTargets() {
   const [dts, setDts] = useState<DeployTarget[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [agentId, setAgentId] = useState(0)
   const [showDrawer, setShowDrawer] = useState(false)
   const [editing, setEditing] = useState<DeployTarget | null>(null)
   const [name, setName] = useState('')
@@ -24,8 +26,12 @@ export default function DeployTargets() {
   const healthy = Object.values(testResults).filter((s) => s === 'success').length
 
   async function load() {
-    const rs = await api<DeployTarget[]>('/api/deploy-targets')
+    const [rs, ags] = await Promise.all([
+      api<DeployTarget[]>('/api/deploy-targets'),
+      api<Agent[]>('/api/agents').catch(() => []),
+    ])
     setDts(rs)
+    setAgents(ags)
     const initial: Record<number, TestStatus> = {}
     for (const t of rs) {
       if (t.lastTestStatus === 'success' || t.lastTestStatus === 'error') {
@@ -51,6 +57,7 @@ export default function DeployTargets() {
   function resetForm() {
     setName('')
     setKubeconfig('')
+    setAgentId(0)
   }
 
   function openCreate() {
@@ -63,13 +70,14 @@ export default function DeployTargets() {
     setEditing(t)
     setName(t.name)
     setKubeconfig('')
+    setAgentId(t.agentId || 0)
     setShowDrawer(true)
   }
 
   async function save() {
     setBusy(true)
     try {
-      const body: Record<string, unknown> = { name }
+      const body: Record<string, unknown> = { name, agentId }
       if (kubeconfig) body.kubeconfig = kubeconfig
       if (editing) {
         await api('/api/deploy-targets/' + editing.id, {
@@ -80,7 +88,7 @@ export default function DeployTargets() {
       } else {
         await api('/api/deploy-targets', {
           method: 'POST',
-          body: JSON.stringify({ ...body, kubeconfig }),
+          body: JSON.stringify({ ...body, kubeconfig, agentId }),
         })
         setToast({ type: 'success', text: '部署环境已添加' })
       }
@@ -107,9 +115,10 @@ export default function DeployTargets() {
   async function test(t: DeployTarget) {
     setTestingId(t.id)
     try {
-      await api('/api/deploy-targets/' + t.id + '/test', { method: 'POST' })
+      const r = await api<{ via?: string; agentName?: string }>('/api/deploy-targets/' + t.id + '/test', { method: 'POST' })
       setTestResults((prev) => ({ ...prev, [t.id]: 'success' }))
-      setToast({ type: 'success', text: '连通正常' })
+      const who = r.via === 'agent' && r.agentName ? `（由 ${r.agentName} 测试）` : '（服务端本机测试）'
+      setToast({ type: 'success', text: '连通正常 ' + who })
     } catch (e) {
       setTestResults((prev) => ({ ...prev, [t.id]: 'error' }))
       setToast({ type: 'error', text: e instanceof Error ? e.message : '连接失败' })
@@ -152,7 +161,7 @@ export default function DeployTargets() {
           { label: '环境总数', value: dts.length, note: '已登记集群' },
           { label: 'kubeconfig 已设置', value: ready, note: '可执行部署' },
           { label: '连接正常', value: healthy, note: '本次会话测试通过' },
-          { label: '默认命名空间', value: dts.filter((t) => t.defaultNamespace).length, note: '已设置回退值' },
+          { label: '已绑定执行器', value: dts.filter((t) => t.agentId).length, note: '内网集群需绑定' },
         ].map((s) => (
           <div key={s.label} className="bg-surface px-4 py-3.5 sm:px-5">
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-faint">{s.label}</div>
@@ -175,12 +184,13 @@ export default function DeployTargets() {
         ) : (
           <>
             <div className="hidden w-full overflow-x-auto md:block">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[920px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
                     <th className="px-5 py-3 font-medium">环境</th>
                     <th className="px-5 py-3 font-medium">命名空间</th>
                     <th className="px-5 py-3 font-medium">kubeconfig</th>
+                    <th className="px-5 py-3 font-medium">执行器</th>
                     <th className="px-5 py-3 font-medium">连接</th>
                     <th className="px-5 py-3 font-medium">最近部署</th>
                     <th className="px-5 py-3 text-right font-medium">操作</th>
@@ -209,6 +219,14 @@ export default function DeployTargets() {
                           <KeyRound size={12} className="text-faint" />
                           {t.kubeconfigSet ? '已设置' : '未设置'}
                         </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        {t.agentId ? (
+                          <div className="text-[11px] text-ink">
+                            {t.agentName || '执行器 #' + t.agentId}
+                            <div className="mt-0.5 text-[10px] text-faint">{t.agentStatus === 'online' ? '在线' : t.agentStatus === 'disabled' ? '已禁用' : '离线'}</div>
+                          </div>
+                        ) : <span className="text-[11px] text-faint">服务端本机</span>}
                       </td>
                       <td className="px-5 py-3">{testLabel(t.id)}</td>
                       <td className="px-5 py-3">
@@ -269,6 +287,10 @@ export default function DeployTargets() {
                       <div className="text-[10px] text-faint">kubeconfig</div>
                       <div className={'mt-0.5 ' + (t.kubeconfigSet ? 'text-ink' : 'text-danger')}>{t.kubeconfigSet ? '已设置' : '未设置'}</div>
                     </div>
+                    <div>
+                      <div className="text-[10px] text-faint">执行器</div>
+                      <div className="mt-0.5 text-ink">{t.agentId ? (t.agentName || '执行器 #' + t.agentId) : '服务端本机'}</div>
+                    </div>
                   </div>
                   {t.lastDeploy ? (
                     <div className="mt-2 text-[10px] text-faint">最近部署 #{t.lastDeploy.number} · {timeAgo(t.lastDeploy.finishedAt)}</div>
@@ -317,6 +339,15 @@ export default function DeployTargets() {
           <FormSection title="集群" description="名称用于流水线的部署目标选择。">
             <Field label="名称">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 production / 萧山集群" />
+            </Field>
+          </FormSection>
+
+          <FormSection title="执行器" description="内网集群需指定能访问该集群的 agent；未绑定时由服务端本机执行。">
+            <Field label="部署执行器" hint="测试连接与实际部署都会经过这个执行器；执行器离线时步骤会排队。">
+              <Select value={agentId} onChange={(e) => setAgentId(Number(e.target.value))}>
+                <option value={0}>服务端本机</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status === 'online' ? '' : a.status === 'disabled' ? '（已禁用）' : '（离线）'}</option>)}
+              </Select>
             </Field>
           </FormSection>
 

@@ -56,6 +56,6 @@ func (s *Store) Migrate() error {
 		&User{}, &Registry{}, &DeployTarget{}, &GitCredential{},
 		&Repository{}, &Pipeline{}, &Run{}, &Step{}, &Variable{},
 		&WebhookEvent{}, &AuditLog{}, &NotifyChannel{}, &AppConfig{},
-		&Agent{},
+		&Agent{}, &AgentCheck{},
 	)
 }

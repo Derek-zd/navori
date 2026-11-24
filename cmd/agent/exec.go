@@ -58,6 +58,10 @@ func (c *client) cancelRunning(stepID uint) {
 
 // executeJob runs one claimed step and reports its terminal status.
 func (c *client) executeJob(ctx context.Context, job agentx.Job) {
+	if job.Kind == "deploy-check" {
+		c.executeCheck(ctx, job)
+		return
+	}
 	jobCtx, cancel := context.WithCancel(ctx)
 	c.addRunning(job.JobID, runningJob{runID: job.RunID, startedAt: time.Now().UTC(), cancel: cancel})
 	defer func() {
@@ -290,4 +294,36 @@ func (l *logSender) Close() {
 	close(l.stop)
 	<-l.done
 	l.flush()
+}
+
+// executeCheck runs a one-off kubectl check and reports it to the dedicated
+// check endpoint. Checks are interactive: they never enter run history.
+func (c *client) executeCheck(ctx context.Context, job agentx.Job) {
+	var p agentx.DeployCheckParams
+	if err := job.DecodeParams(&p); err != nil {
+		c.reportCheck(ctx, job.JobID, false, err.Error())
+		return
+	}
+	timeout := time.Duration(p.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err := runner.CheckDeploy(checkCtx, p.Kubeconfig, p.Namespace)
+	ok := err == nil
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		if ctx.Err() != nil {
+			msg = "agent shutting down"
+		}
+		if len(msg) > 2000 {
+			msg = msg[:2000]
+		}
+	}
+	log.Printf("deploy-check %d: ok=%v %s", job.JobID, ok, msg)
+	rctx, rcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer rcancel()
+	c.reportCheck(rctx, job.JobID, ok, msg)
 }

@@ -40,6 +40,7 @@ type DeployTarget struct {
 	IsDefault        bool   `gorm:"not null;default:false"`
 	LastTestStatus   string `gorm:"size:16"`
 	LastTestAt       *time.Time
+	AgentID          uint `gorm:"index"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -189,4 +190,18 @@ type AppConfig struct {
 	LastCleanupAt   *time.Time
 	LastCleanupMode string `gorm:"size:16"`
 	UpdatedAt       time.Time
+}
+
+// AgentCheck is a one-off command sent to an agent (currently deploy target
+// connectivity checks). It is deliberately separate from steps so tests never
+// appear in run history or consume step leases.
+type AgentCheck struct {
+	ID             uint   `gorm:"primaryKey"`
+	AgentID        uint   `gorm:"index;not null"`
+	DeployTargetID uint   `gorm:"index;not null"`
+	Status         string `gorm:"size:16;not null;default:pending"`
+	Error          string `gorm:"type:text"`
+	CreatedAt      time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
 }

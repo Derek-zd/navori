@@ -33,8 +33,7 @@ type deployConfig struct {
 }
 
 type executionConfig struct {
-	BuildAgent  string `json:"buildAgent"`
-	DeployAgent string `json:"deployAgent"`
+	BuildAgent string `json:"buildAgent"`
 }
 
 // resolvedConfig is the effective pipeline config after branch-rule resolution.
