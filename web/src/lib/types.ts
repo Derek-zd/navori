@@ -147,6 +147,7 @@ export interface NotifyChannel {
   name: string
   type: string
   config: Record<string, string>
+  systemAlerts?: boolean
 }
 
 export interface Agent {

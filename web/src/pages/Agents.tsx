@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Cpu, KeyRound, Pencil, Plus, Power, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { AlertTriangle, Cpu, KeyRound, Pencil, Plus, Power, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Agent } from '../lib/types'
 import {
@@ -191,6 +191,7 @@ export default function Agents() {
   }
 
   const online = agents.filter((a) => a.status === 'online').length
+  const offline = agents.filter((a) => a.status === 'offline').length
   const disabled = agents.filter((a) => a.status === 'disabled').length
 
   return (
@@ -226,6 +227,16 @@ export default function Agents() {
           </div>
         ))}
       </div>
+
+      {offline > 0 ? (
+        <div className="mb-5 flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+          <div className="min-w-0 text-xs leading-5">
+            <span className="font-medium text-ink">{offline} 个执行器离线</span>
+            <span className="text-muted">。依赖其能力与标签的步骤会保持排队，不会自动回退到本机。</span>
+          </div>
+        </div>
+      ) : null}
 
       <Card className="overflow-hidden">
         {agents.length === 0 ? (

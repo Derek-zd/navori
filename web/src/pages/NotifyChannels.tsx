@@ -26,6 +26,7 @@ export default function NotifyChannels() {
   const [refreshing, setRefreshing] = useState(false)
   const [name, setName] = useState('')
   const [type, setType] = useState('rest')
+  const [systemAlerts, setSystemAlerts] = useState(false)
   const [cfg, setCfg] = useState<Record<string, string>>({})
   const { toast, setToast } = useToast()
 
@@ -50,6 +51,7 @@ export default function NotifyChannels() {
   function reset() {
     setName('')
     setType('rest')
+    setSystemAlerts(false)
     setCfg({})
   }
 
@@ -63,6 +65,7 @@ export default function NotifyChannels() {
     setEditing(c)
     setName(c.name)
     setType(c.type)
+    setSystemAlerts(!!c.systemAlerts)
     setCfg(typeof c.config === 'object' && c.config ? c.config : {})
     setShowDrawer(true)
   }
@@ -74,7 +77,7 @@ export default function NotifyChannels() {
   async function save() {
     setBusy(true)
     try {
-      const body = { name, type, config: cfg }
+      const body = { name, type, config: cfg, systemAlerts }
       if (editing) {
         await api('/api/notify-channels/' + editing.id, { method: 'PATCH', body: JSON.stringify(body) })
         setToast({ type: 'success', text: '通道已更新' })
@@ -176,7 +179,10 @@ export default function NotifyChannels() {
                           </span>
                           <div>
                             <div className="text-xs font-medium text-ink">{c.name}</div>
-                            <div className="mt-0.5 text-[10px] text-faint">#{c.id}</div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-faint">
+                              <span>#{c.id}</span>
+                              {c.systemAlerts ? <span className="rounded bg-copper/10 px-1.5 py-0.5 text-[9px] text-copper">执行器告警</span> : null}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -207,6 +213,7 @@ export default function NotifyChannels() {
                     <div className="min-w-0">
                       <div className="truncate text-xs font-medium text-ink">{c.name}</div>
                       <div className="mt-0.5 text-[10px] text-faint">{typeLabel(c.type)} · {configSummary(c)}</div>
+                      {c.systemAlerts ? <div className="mt-1 inline-flex rounded bg-copper/10 px-1.5 py-0.5 text-[9px] text-copper">执行器告警</div> : null}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-0.5">
@@ -275,9 +282,19 @@ export default function NotifyChannels() {
             )}
           </FormSection>
 
+          <FormSection title="告警范围" description="执行器上线/离线属于系统事件，不绑定具体流水线。">
+            <label className={'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ' + (systemAlerts ? 'border-brand/40 bg-brand/5' : 'border-line bg-surface hover:bg-surface-2/60')}>
+              <input type="checkbox" checked={systemAlerts} onChange={(e) => setSystemAlerts(e.target.checked)} className="mt-0.5 accent-brand" />
+              <span>
+                <span className="block text-xs font-medium text-ink">接收执行器状态告警</span>
+                <span className="mt-0.5 block text-[11px] leading-5 text-muted">执行器上线或离线时发送到本通道；离线判定为 45 秒无心跳。</span>
+              </span>
+            </label>
+          </FormSection>
+
           <div className="flex items-start gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-[10px] leading-5 text-faint">
             <Send size={12} className="mt-0.5 shrink-0" />
-            通知在运行进入终态后发送；失败不会影响运行结果。
+            运行通知在终态发送；执行器告警在上线/离线时发送。失败不会影响运行结果。
           </div>
         </div>
       </Drawer>

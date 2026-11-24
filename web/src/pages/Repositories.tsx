@@ -280,6 +280,7 @@ export default function Repositories() {
                         <div>
                           <div className="text-[10px] text-faint">Dockerfile</div>
                           <div className="mt-0.5 truncate font-mono text-ink">{r.dockerfilePath || '—'}</div>
+                          <div className="mt-0.5 truncate font-mono text-[10px] text-faint">{r.defaultBranch || '分支未探测'}</div>
                         </div>
                       </div>
                       {r.scanMessage && r.scanStatus === 'error' ? (

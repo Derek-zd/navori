@@ -9,6 +9,28 @@ import { formatDateTime } from '../lib/format'
 interface SettingsAPI {
   smtp: Record<string, string>
 }
+
+const ACTION_LABELS: Record<string, string> = {
+  'repository.create': '创建仓库', 'repository.update': '更新仓库', 'repository.delete': '删除仓库', 'repository.scan': '扫描仓库',
+  'pipeline.create': '创建流水线', 'pipeline.update': '更新流水线', 'pipeline.delete': '删除流水线', 'pipeline.run': '触发运行',
+  'registry.create': '创建镜像仓库', 'registry.update': '更新镜像仓库', 'registry.delete': '删除镜像仓库', 'registry.test': '测试镜像仓库',
+  'deploytarget.create': '创建部署环境', 'deploytarget.update': '更新部署环境', 'deploytarget.delete': '删除部署环境', 'deploytarget.test': '测试部署环境',
+  'variable.create': '创建变量', 'variable.update': '更新变量', 'variable.delete': '删除变量',
+  'channel.create': '创建通知通道', 'channel.update': '更新通知通道', 'channel.delete': '删除通知通道',
+  'user.create': '创建用户', 'user.update': '更新用户', 'user.delete': '删除用户',
+  'credential.create': '创建凭证', 'credential.update': '更新凭证', 'credential.delete': '删除凭证',
+  'settings.update': '更新系统设置', 'storage.policy.update': '更新存储策略',
+  'storage.cleanup.prune': '清理构建缓存', 'storage.cleanup.deep': '深度清理',
+  'approve': '通过审批', 'reject': '拒绝审批', 'run.stop': '取消运行', 'run.rerun': '重跑',
+  'agent.register': '登记执行器', 'agent.update': '更新执行器', 'agent.disable': '禁用执行器', 'agent.enable': '启用执行器',
+  'agent.rotate': '轮换执行器 token', 'agent.delete': '删除执行器',
+  'step.dispatch': '派发步骤', 'step.result': '步骤结果',
+}
+
+function actionLabel(action: string) {
+  return ACTION_LABELS[action] || action
+}
+
 interface AuditLog {
   id: number
   username: string
@@ -439,7 +461,7 @@ export default function Settings() {
             </div>
             <Select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} className="!w-40 !py-1.5 text-xs">
               <option value="">全部操作</option>
-              {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+              {actions.map((a) => <option key={a} value={a}>{actionLabel(a)}</option>)}
             </Select>
           </div>
           {filteredLogs.length === 0 ? (
@@ -461,7 +483,7 @@ export default function Settings() {
                       <tr key={l.id} className="border-b border-line/70 last:border-0 hover:bg-surface-2/60">
                         <td className="whitespace-nowrap px-5 py-3 text-[11px] text-muted">{formatDateTime(l.createdAt)}</td>
                         <td className="px-5 py-3">
-                          <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink">{l.action}</span>
+                          <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[10px] text-ink" title={l.action}>{actionLabel(l.action)}</span>
                         </td>
                         <td className="px-5 py-3 text-[11px] text-ink">{l.username || '—'}</td>
                         <td className="max-w-[300px] truncate px-5 py-3 font-mono text-[10px] text-muted">{l.target}</td>
@@ -474,7 +496,7 @@ export default function Settings() {
                 {filteredLogs.slice(0, showAll ? undefined : 50).map((l) => (
                   <div key={l.id} className="p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink">{l.action}</span>
+                      <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[10px] text-ink" title={l.action}>{actionLabel(l.action)}</span>
                       <span className="text-[10px] text-faint">{formatDateTime(l.createdAt)}</span>
                     </div>
                     <div className="mt-1.5 truncate font-mono text-[10px] text-muted">{l.target}</div>

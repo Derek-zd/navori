@@ -167,6 +167,7 @@ export function Drawer({
   width?: string
 }) {
   const idRef = useRef(0)
+  const panelRef = useRef<HTMLDivElement>(null)
   if (idRef.current === 0) idRef.current = ++drawerSeq
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -175,20 +176,51 @@ export function Drawer({
     if (!open) return
     const id = idRef.current
     const previous = document.body.style.overflow
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     document.body.style.overflow = 'hidden'
     drawerStack.push(id)
+    const panel = panelRef.current
+    const focusableSelector =
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const focusFirst = () => {
+      // Prefer the first form control over the header close button.
+      const field = panel?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
+      const first = field || panel?.querySelector<HTMLElement>(focusableSelector)
+      ;(first || panel)?.focus()
+    }
+    const raf = requestAnimationFrame(focusFirst)
     const onKey = (e: KeyboardEvent) => {
-      // Only the topmost drawer should react to Escape.
-      if (e.key === 'Escape' && drawerStack[drawerStack.length - 1] === id) {
+      // Only the topmost drawer should react to Escape or trap Tab.
+      if (drawerStack[drawerStack.length - 1] !== id) return
+      if (e.key === 'Escape') {
         onCloseRef.current()
+        return
+      }
+      if (e.key !== 'Tab' || !panel) return
+      const items = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter((el) => el.offsetParent !== null)
+      if (items.length === 0) {
+        e.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => {
+      cancelAnimationFrame(raf)
       const i = drawerStack.lastIndexOf(id)
       if (i >= 0) drawerStack.splice(i, 1)
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
+      previousFocus?.focus?.()
     }
   }, [open])
 
@@ -196,7 +228,7 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/35 animate-[fade-in_160ms_ease-out]" onClick={() => onCloseRef.current()} />
-      <div className={'absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-surface shadow-overlay animate-[drawer-in_200ms_ease-out] ' + width}>
+      <div ref={panelRef} tabIndex={-1} className={'absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-surface shadow-overlay outline-none animate-[drawer-in_200ms_ease-out] ' + width}>
         <div className="flex shrink-0 items-start justify-between gap-6 border-b border-line px-6 py-5">
           <div>
             <h2 className="text-base font-semibold text-ink">{title}</h2>
