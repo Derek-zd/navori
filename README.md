@@ -1,159 +1,120 @@
 # Navori
 
-一个「git 托管平台无关」、单容器可启动、带 Web 界面的轻量 CI/CD 工具。
-只要仓库里有 Dockerfile，就能「按分支触发 → 构建镜像 → 推送仓库 →（可选审批）部署到 K8s」，跑完发 webhook 通知。
+轻量、自托管的 CI/CD 控制台。仓库里只要有 Dockerfile，就能按分支触发：
+
+**拉取代码 → 构建镜像 → 推送仓库 →（可选审批）→ 部署到 Kubernetes**
+
+单容器启动，SQLite 默认 / MySQL 可选，自带 Web 界面和实时日志。
 
 ## 功能
 
-- 仓库接入（任意 git 源，HTTPS/SSH），Dockerfile 扫描
-- 触发：webhook（通用格式 + GitLab）、手动运行/重跑、按分支规则
-- 构建推送：docker/podman build + push，tag 模板（分支/commit/时间/全局变量/字面量）
-- 部署：kubectl set image + rollout status + 失败回滚
-- 审批：部署前人工审批（admin/user 两级）
-- 通知：跑完发 outgoing webhook（HMAC 签名）；可把执行器上线/离线告警投递到指定通道
-- 存储：SQLite（默认）/ MySQL 可选
-- 实时日志：SSE 流式输出
+- **仓库**：接入任意 git 源（HTTPS / SSH），自动扫描默认分支与 Dockerfile。
+- **触发**：GitLab Push / 通用 webhook、手动运行与重跑、cron、分支规则（glob，首个命中生效）。
+- **构建推送**：docker / podman，tag 模板支持分支、commit、时间、变量。
+- **部署**：kubectl set image + rollout status，失败自动回滚；0 副本直接跳过。
+- **审批**：部署前人工审批，审批始终在 server 执行。
+- **执行器**：构建和部署可交给不同机器；部署执行器绑定在部署环境上，测试连接与真实部署走同一路径。
+- **通知**：REST / 邮件 / 飞书 / 钉钉 / 企业微信；支持执行器上线、离线告警。
+- **其他**：管理员/成员两级权限、审计日志、运行日志 SSE、环境变量与加密凭证。
 
-## 快速开始（本地 / 裸机）
+## 快速开始
+
+需要 Go 1.24+、Node 20+。前端由 `go:embed` 内嵌，所以先构建前端：
 
 ```bash
-# 需要本机装 go 1.24+、node 20+；或直接用 Docker（见下节）
-go build -o navori ./cmd/server   # 前端由 go:embed 内嵌，需先 cd web && npm ci && npm run build
+cd web
+npm ci
+npm run build
+cd ..
+
+go build -o navori ./cmd/server
 DATA_DIR=./data ADMIN_PASSWORD=your-password ./navori
 ```
 
-首次启动会生成 admin 账号（默认用户名 admin），密码来自 ADMIN_PASSWORD（留空则自动生成并打印到日志）。
-浏览器打开 http://localhost:3000 登录。
+打开 <http://localhost:3000>，用 `admin` / `ADMIN_PASSWORD` 登录。
+`ADMIN_PASSWORD` 留空时首次启动会自动生成并打印到日志。
 
-## 配置
-
-配置来源只有两种（**环境变量 > 配置文件**，环境变量非空时覆盖配置文件；都不设则用默认）：
-
-1. **环境变量** —— K8s/容器用 `-e` 或 Secret 注入
-2. **配置文件（可选）** —— `.env` 风格 `KEY=VALUE` 文本，与 .env.example 同格式：
-   ```bash
-   ./navori -config /path/to/navori.env      # 显式指定
-   ./navori                                  # 不指定则自动探测 ./navori.env → /etc/navori/navori.env
-   ```
-   模板见 [.env.example](.env.example)（`cp .env.example navori.env` 改之即可）。
-
-完整变量表见 [.env.example](.env.example)。几个关键项：
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| DB_DRIVER / DB_DSN | sqlite / - | `sqlite` 或 `mysql`；mysql 需 DSN：`user:pass@tcp(host:3306)/navori?charset=utf8mb4&parseTime=True&loc=Local` |
-| DATA_DIR | data | 仓库克隆缓存 + run 日志（**纯缓存**，非业务状态） |
-| MASTER_KEY | - | AES 主密钥（`openssl rand -hex 32`）；**生产必设**，否则自动生成到 DATA_DIR/master.key |
-| JWT_SECRET | - | JWT 密钥；生产建议显式设置，否则自动生成到 DATA_DIR/jwt.secret |
-| ADMIN_PASSWORD | - | admin 初始密码；留空首启自动生成并打印日志 |
-| BASE_URL | http://localhost:3000 | webhook 展示用外网地址 |
-
-> **为什么 MySQL 还要设 MASTER_KEY/JWT_SECRET**：凭据（Git/镜像仓库密码、kubeconfig）以 AES 密文存库，解密靠 `MASTER_KEY`。它不设就会落到 `DATA_DIR/master.key`；`DATA_DIR` 只是缓存目录，Pod 重建即丢 → 密钥重建 → 旧密文全解不开。设了 env/文件里的 `MASTER_KEY` 就不依赖 DATA_DIR 持久化（PVC 也就不用挂了）。
-
-## Docker 镜像
+## Docker 构建与运行
 
 ```bash
 docker build -t navori:latest .
-# 国内网络慢可指定镜像源：
-docker build \
-  --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
-  --build-arg GOPROXY=https://goproxy.cn,direct \
-  --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine \
-  -t navori:latest .
-```
 
-镜像内嵌前端，内置 **rootful podman**（软链为 `docker`，与 aiops 同款方案）作为业务镜像构建器。K8s Pod 内直接 build/push 需要 **`privileged: true`**（构建时挂载 overlay 存储），裸机/单机 docker run 需要加 `--privileged`。运行：
+# 先生成并保存，后续启动继续使用同一个值
+MASTER_KEY=$(openssl rand -hex 32)
 
-```bash
-# 裸机/单机：privileged 供 podman 挂载 overlay；数据目录挂出来（可选）
 docker run -d --name navori -p 3000:3000 --privileged \
-  -e ADMIN_PASSWORD=your-password -e MASTER_KEY=$(openssl rand -hex 32) \
-  -v navori-data:/data navori:latest
+  -e ADMIN_PASSWORD=your-password \
+  -e MASTER_KEY="$MASTER_KEY" \
+  -v navori-data:/data \
+  navori:latest
 ```
 
-K8s 部署（MySQL + Secret 注入密钥）直接用模板：[examples/k8s/navori.yaml](examples/k8s/navori.yaml) —— 替换占位值后 `kubectl apply -f` 即可；是否挂 PVC（保历史日志）按模板顶部注释可选。
+镜像内使用 rootful podman 构建业务镜像，所以 Docker 运行需要 `--privileged`。
+国内网络可用 `--build-arg NPM_REGISTRY=... --build-arg GOPROXY=... --build-arg ALPINE_MIRROR=...` 换源。
 
-## 流水线模型
+Kubernetes 模板见 [examples/k8s/navori.yaml](examples/k8s/navori.yaml)：
+单实例 + RWO PVC 时，Deployment 请使用 `Recreate`，不要用默认滚动更新。
 
-一仓库一流水线，固定步骤：pull → build → push →（approve，可选）→ deploy（可选）。
-分支规则按顺序匹配（glob，* 单段 / ** 跨段），首个命中生效，规则字段浅合并覆盖 defaults。
-配置见 examples/pipeline-config.json。
+## 分布式执行器（可选）
 
-## 构建执行形态
+默认所有步骤都在 server 本机执行。需要跨网络构建或部署时，在「执行器」页登记 agent。
 
-构建镜像时 shell 出 docker/podman。K8s 容器部署采用 **rootful podman + privileged**（与 aiops 同款、已验证）；
-裸机部署则直接使用宿主 docker/podman + git + kubectl。详见 docs/DESIGN.md §4.1。
+- **构建执行器**：在流水线的「构建与推送」里选择；留空 = server 本机。
+- **部署执行器**：在「部署环境」里绑定；流水线只选部署环境，deploy 自动使用绑定机器。
+- 一台 agent 可同时承担构建和部署。
+- 选了执行器但机器离线时，步骤保持排队，不会自动回退本机。
+- 审批永远在 server，agent 不访问数据库。
 
-## 分布式执行（可选）
-
-默认所有步骤在本机执行。需要跨网络构建/部署时，可在「执行器」页登记 agent。
-
-- **构建执行器**：在流水线的「构建与推送」里选择，保存为 `execution.buildAgent`；留空 = server 本机。
-- **部署执行器**：不再在流水线里选，而是在「部署环境」里绑定；deploy 步骤自动使用该环境的执行器。
-  内网集群的 kubeconfig 只有对应机器能访问，绑定后测试连接和实际部署都走同一台 agent。
-- 一台 agent 可以同时具备构建与部署能力；部署环境未绑定 agent 时由 server 本机执行。
-- 构建执行器留空、部署环境未绑定 agent 时，行为与旧版本完全一致。
-- 一旦选了执行器/绑定了 agent，但该 agent 离线，步骤会保持排队直到超时，不会自动回退本机。
-
-pull/build/push 走构建执行器，deploy 走部署环境绑定的执行器，审批始终留在 server。
-
-构建 agent 二进制：
+构建 agent：
 
 ```bash
+# 在目标机器上
 go build -o navori-agent ./cmd/agent
+
+# 或交叉编译 Linux amd64
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags="-s -w" \
+  -o dist/navori-agent-linux-amd64 ./cmd/agent
+```
+
+在页面创建执行器并复制一次性 token，然后写配置：
+
+```bash
 cp examples/navori-agent.env.example navori-agent.env
-# 在「执行器」页创建 agent，把一次性 token 复制到 AGENT_TOKEN，然后：
+# 填 NAVORI_URL、AGENT_TOKEN、AGENT_WORKDIR
+./navori-agent -check -config navori-agent.env   # 自检
 ./navori-agent -config navori-agent.env
 ```
 
-启动前可以先做一次本地自检（只检查工作目录和 git/docker/podman/kubectl，不连接 server）：
+名称在页面登记，token 自动识别，不需要在配置里写 `AGENT_NAME`。
+构建机需要 git + docker/podman，部署机需要 kubectl。
 
-```bash
-./navori-agent -version
-./navori-agent -check -config navori-agent.env
-```
+生产环境用 systemd 常驻，示例见 [examples/navori-agent.service](examples/navori-agent.service)。
+配置项见 [examples/navori-agent.env.example](examples/navori-agent.env.example)。
 
-生产环境用 systemd 常驻（示例：[examples/navori-agent.service](examples/navori-agent.service)）：
+## 配置
 
-```bash
-sudo useradd --system --home /var/lib/navori-agent --shell /usr/sbin/nologin navori
-sudo install -d -o navori -g navori /var/lib/navori-agent /etc/navori
-sudo install -m 0600 -o navori -g navori navori-agent.env /etc/navori/navori-agent.env
-sudo install -m 0755 navori-agent /usr/local/bin/navori-agent
-sudo install -m 0644 examples/navori-agent.service /etc/systemd/system/navori-agent.service
-# 如果使用 Docker，把 navori 加入 docker 组（或改用 podman 并配置对应 socket 权限）
-sudo usermod -aG docker navori
-sudo systemctl daemon-reload
-sudo systemctl enable --now navori-agent
-sudo journalctl -u navori-agent -f
-```
+环境变量优先于配置文件；不指定 `-config` 时自动查找 `./navori.env` → `/etc/navori/navori.env`。
+完整变量表见 [.env.example](.env.example)。
 
-`-check` 缺失工具时只打印警告并返回 0，因为同一份二进制可能只承担构建或只承担部署；
-实际派发由执行器标签和流水线 selector 决定。
+常用配置：
 
-所有 agent 使用同一个二进制和同一套配置模板，但每台必须使用独立的 `AGENT_TOKEN`；
-名称在「执行器」页面登记，agent 通过 token 自动识别，不需要在配置文件里填写名称。
-标签在「执行器」页面维护（server 为准，agent 上报的 `AGENT_LABELS` 不会覆盖登记值）。能执行什么由
-机器上实际安装的工具决定：构建机需要 git + docker（或软链为 docker 的 podman），部署机需要 kubectl。
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | `3000` | Web 端口 |
+| `DB_DRIVER` / `DB_DSN` | `sqlite` / - | `sqlite` 或 `mysql` |
+| `DATA_DIR` | `data` | 仓库缓存、运行日志、密钥 |
+| `MASTER_KEY` | - | 凭据加密密钥（32 字节 hex）；生产必设 |
+| `JWT_SECRET` | - | 登录 token 密钥；生产建议设置 |
+| `ADMIN_PASSWORD` | - | admin 初始密码；留空自动生成 |
+| `BASE_URL` | `http://localhost:3000` | 对外地址，用于 webhook 展示 |
 
-agent 只主动发起出站 HTTPS（hello/心跳/领任务/传日志/报结果），不监听端口、不访问数据库、
-不写 server 的 DATA_DIR。凭据随任务下发，仅以 0600 临时文件或临时 DOCKER_CONFIG 使用后删除。
-配置项见 [examples/navori-agent.env.example](examples/navori-agent.env.example)，协议见 docs/API.md §十四。
-
-## 项目结构
-
-    cmd/server/       服务端入口
-    cmd/agent/        分布式执行 agent 入口
-    internal/         后端（api/store/runner/tagx/buildx/deploy/notify/...）
-    web/              React SPA（Vite + Tailwind）
-    docs/             方案与契约（API.md 为唯一权威）
+MySQL 场景务必显式设置 `MASTER_KEY`，否则密钥会落在 `DATA_DIR`，Pod 重建后旧密文无法解密。
 
 ## 文档
 
-- docs/API.md — 接口契约（唯一权威）
-- docs/DESIGN.md — 技术方案
-- docs/RESEARCH.md — 调研与选型
-- docs/TESTING.md — 测试策略
-- docs/MILESTONES.md — 里程碑验收
-
-
+- [docs/API.md](docs/API.md)：接口契约
+- [docs/DESIGN.md](docs/DESIGN.md)：技术方案
+- [docs/AGENT-DESIGN.md](docs/AGENT-DESIGN.md)：分布式执行设计
+- [docs/RESEARCH.md](docs/RESEARCH.md)：调研与选型
+- [docs/TESTING.md](docs/TESTING.md)：测试策略
