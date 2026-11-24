@@ -132,7 +132,7 @@ func TestWebhookRetryAfterTriggerError(t *testing.T) {
 
 func TestWebhookRetriesOrphanedDedupEvent(t *testing.T) {
 	s, db := newDispatchTestServer(t)
-	repo := store.Repository{Name: "app3", GitURL: "https://github.com/acme/app3.git", DefaultBranch: "main"}
+	repo := store.Repository{Name: "app3", GitURL: "file:///nonexistent/app3", DefaultBranch: "main"}
 	if err := db.Create(&repo).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestWebhookRetriesOrphanedDedupEvent(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"ref":"refs/heads/main","commit":%q,"repoUrl":"https://github.com/acme/app3.git"}`, commit)
+	body := fmt.Sprintf(`{"ref":"refs/heads/main","commit":%q,"repoUrl":"file:///nonexistent/app3"}`, commit)
 	req := httptest.NewRequest("POST", "/api/webhooks?token=tok3", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	s.webhook(rec, req)

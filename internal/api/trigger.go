@@ -152,7 +152,11 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 			return nil, err
 		}
 	}
-	go s.executeRun(&run, repo, branch, config)
+	s.runWG.Add(1)
+	go func() {
+		defer s.runWG.Done()
+		s.executeRun(&run, repo, branch, config)
+	}()
 	s.gcRuns(p.ID, s.Cfg.RunRetention)
 	return &run, nil
 }

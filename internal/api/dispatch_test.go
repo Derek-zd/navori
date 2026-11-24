@@ -29,7 +29,16 @@ func newDispatchTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err := st.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	return &Server{DB: st, Cfg: &config.Config{DataDir: t.TempDir()}}, st.DB
+	s := &Server{DB: st, Cfg: &config.Config{DataDir: t.TempDir()}}
+	t.Cleanup(func() {
+		s.cancelMu.Lock()
+		for _, cancel := range s.cancels {
+			cancel()
+		}
+		s.cancelMu.Unlock()
+		s.runWG.Wait()
+	})
+	return s, st.DB
 }
 
 func newRunFixture(t *testing.T, db *gorm.DB) (*store.Repository, *store.Run) {

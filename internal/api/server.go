@@ -30,6 +30,7 @@ type Server struct {
 
 	cancelMu sync.Mutex
 	cancels  map[uint]context.CancelFunc
+	runWG    sync.WaitGroup
 
 	approveMu    sync.Mutex
 	approveChans map[uint]chan string
