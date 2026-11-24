@@ -18,7 +18,6 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "E_FORBIDDEN", "admin only")
 		return
 	}
-	s.markStaleAgentsOffline()
 	var agents []store.Agent
 	if err := s.DB.DB.Order("id desc").Find(&agents).Error; err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())

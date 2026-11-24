@@ -14,6 +14,7 @@
 | 2026-09-07 | 新增 §13.1 存储管理（用量/清理/策略）；`POST /api/system/storage/cleanup` 增加 `reclaimed` 字段，deep 语义修正为 `rm -af` + `--external` |
 | 2026-11-18 | 新增 §十四 分布式执行 agent（P1：鉴权/握手/心跳/管理端；P3：claim/日志/结果/租约/取消）；步骤新增 `queued` 状态；新增 `E_AUTH`、`E_PROTOCOL` |
 | 2026-11-23 | Webhook 明确成功 202 / 跳过 200 并返回 `reason`、`branch`；执行器 selector 支持 `agent=<id>` |
+| 2026-11-24 | 通知通道新增 `systemAlerts`；新增 §11.2 执行器上线/离线告警事件 |
 
 ---
 
@@ -269,6 +270,34 @@ run 达终态后 POST 到 NotifyConfig.webhookUrl：
 - Header: X-Navori-Signature: sha256=HMAC(secret, body)
 - body: { event: "run.finished", pipelineId, repo, branch, commit, commitShort, status, imageTag, error, startedAt, finishedAt }
 - 重试：3 次指数退避；失败仅记日志，不阻断 run
+
+### 11.1 通知通道
+
+GET /api/notify-channels → 200 { data: [NotifyChannel] }
+POST /api/notify-channels → 201 { data: NotifyChannel }
+PATCH /api/notify-channels/{id} → 200 { data: NotifyChannel }
+DELETE /api/notify-channels/{id} → 200 { data: {} }
+
+NotifyChannel = {
+  id, name, type: "rest" | "email" | "feishu" | "dingtalk" | "wecom",
+  config,                       // 敏感字段返回 "already-set"
+  systemAlerts: boolean         // 是否接收执行器上线/离线告警
+}
+
+创建/更新 body：{ name, type, config, systemAlerts? }
+
+### 11.2 执行器状态告警
+
+把通知通道的 `systemAlerts` 设为 true 后，服务端会在执行器状态切换时发送：
+
+    { event: "agent.online" | "agent.offline",
+      status: "online" | "offline",
+      agentId, agentName, agentLabels, hostname, version, lastSeenAt }
+
+- 离线判定：`last_seen_at` 超过 45s；server 每 15s 巡检一次。
+- 仅在状态发生变化时发送一次，不重复告警。
+- server 启动后的首次巡检不发送离线告警，避免重启时误报。
+- REST 通道收到上述 JSON；邮件/IM 通道使用更适合阅读的执行器状态文案。
 
 ---
 

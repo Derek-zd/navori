@@ -74,6 +74,7 @@ func (s *Server) agentHello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	wasOnline := a.Status == "online"
 	updates := map[string]interface{}{
 		"status":       "online",
 		"version":      trimLimit(req.Version, 32),
@@ -87,6 +88,14 @@ func (s *Server) agentHello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("agent %q connected (version=%s host=%s)", a.Name, req.Version, req.Host)
+	if !wasOnline {
+		cur := *a
+		cur.Status = "online"
+		cur.Version = trimLimit(req.Version, 32)
+		cur.Hostname = trimLimit(req.Host, 128)
+		cur.LastSeenAt = &now
+		go s.notifyAgentStatus(&cur, "online")
+	}
 	writeJSON(w, http.StatusOK, agentx.HelloResp{
 		Protocol:         agentx.Protocol,
 		Name:             a.Name,
@@ -108,6 +117,7 @@ func (s *Server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	wasOnline := a.Status == "online"
 	updates := map[string]interface{}{
 		"status":       "online",
 		"last_seen_at": now,
@@ -119,6 +129,15 @@ func (s *Server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if err := s.DB.DB.Model(&store.Agent{}).Where("id = ?", a.ID).Updates(updates).Error; err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 		return
+	}
+	if !wasOnline {
+		cur := *a
+		cur.Status = "online"
+		cur.LastSeenAt = &now
+		if req.Version != "" {
+			cur.Version = trimLimit(req.Version, 32)
+		}
+		go s.notifyAgentStatus(&cur, "online")
 	}
 	if err := s.DB.DB.Model(&store.Step{}).
 		Where("agent_id = ? AND status = ?", a.ID, "running").
@@ -295,7 +314,9 @@ func isTerminalStep(status string) bool {
 // become offline promptly.
 func (s *Server) StartAgentJanitor(ctx context.Context) {
 	go func() {
-		s.markStaleAgentsOffline()
+		// Do not alert on the initial sweep: agents from the previous server
+		// process are expected to reconnect within the offline grace period.
+		s.markStaleAgentsOffline(false)
 		s.expireStepLeases()
 		t := time.NewTicker(agentJanitorEvery)
 		defer t.Stop()
@@ -304,19 +325,37 @@ func (s *Server) StartAgentJanitor(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				s.markStaleAgentsOffline()
+				s.markStaleAgentsOffline(true)
 				s.expireStepLeases()
 			}
 		}
 	}()
 }
 
-func (s *Server) markStaleAgentsOffline() {
+func (s *Server) markStaleAgentsOffline(notify bool) {
 	cutoff := time.Now().UTC().Add(-agentOfflineAfter)
-	if err := s.DB.DB.Model(&store.Agent{}).
+	var agents []store.Agent
+	if err := s.DB.DB.
 		Where("status = ? AND (last_seen_at IS NULL OR last_seen_at < ?)", "online", cutoff).
-		Update("status", "offline").Error; err != nil {
+		Find(&agents).Error; err != nil {
 		log.Printf("agent janitor: %v", err)
+		return
+	}
+	for i := range agents {
+		res := s.DB.DB.Model(&store.Agent{}).
+			Where("id = ? AND status = ?", agents[i].ID, "online").
+			Update("status", "offline")
+		if res.Error != nil {
+			log.Printf("agent janitor: mark %q offline: %v", agents[i].Name, res.Error)
+			continue
+		}
+		if res.RowsAffected == 0 {
+			continue
+		}
+		log.Printf("agent %q marked offline (last seen %s)", agents[i].Name, timeStr(agents[i].LastSeenAt))
+		if notify {
+			go s.notifyAgentStatus(&agents[i], "offline")
+		}
 	}
 }
 

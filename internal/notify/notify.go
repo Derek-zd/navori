@@ -83,6 +83,46 @@ func SendChannel(typ string, cfg map[string]interface{}, ev Event) error {
 	}
 }
 
+// agentEvent formats executor online/offline notifications. It returns the
+// title, plain text and markdown text used by IM/email channels.
+func agentEvent(ev Event) (title, plain, markdown string, ok bool) {
+	event, _ := ev["event"].(string)
+	if !strings.HasPrefix(event, "agent.") {
+		return "", "", "", false
+	}
+	status, _ := ev["status"].(string)
+	name, _ := ev["agentName"].(string)
+	host, _ := ev["hostname"].(string)
+	labels, _ := ev["agentLabels"].(string)
+	version, _ := ev["version"].(string)
+	lastSeen, _ := ev["lastSeenAt"].(string)
+	if name == "" {
+		name = "执行器"
+	}
+	if host == "" {
+		host = "—"
+	}
+	if labels == "" {
+		labels = "—"
+	}
+	if version == "" {
+		version = "—"
+	}
+	if lastSeen == "" {
+		lastSeen = "—"
+	}
+	icon, word := "🟢", "上线"
+	if status == "offline" {
+		icon, word = "🔴", "离线"
+	}
+	title = fmt.Sprintf("%s 执行器%s", icon, word)
+	plain = fmt.Sprintf("%s 执行器%s：%s\n主机: %s\n标签: %s\n版本: %s\n心跳: %s",
+		icon, word, name, host, labels, version, lastSeen)
+	markdown = fmt.Sprintf("**%s 执行器%s：%s**\n主机: %s\n标签: %s\n版本: %s\n心跳: %s",
+		icon, word, name, host, labels, version, lastSeen)
+	return title, plain, markdown, true
+}
+
 // sendIM posts a generic text payload to an IM webhook (simplified).
 func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 	url, _ := cfg["webhook"].(string)
@@ -97,20 +137,23 @@ func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 	commit, _ := ev["commitShort"].(string)
 	branch, _ := ev["branch"].(string)
 
-	name := repo
-	if name == "" {
-		name = fmt.Sprintf("流水线 #%.0f", pipeline)
+	mdTitle, plainLine, mdLine, isAgent := agentEvent(ev)
+	if !isAgent {
+		name := repo
+		if name == "" {
+			name = fmt.Sprintf("流水线 #%.0f", pipeline)
+		}
+		displayName := name
+		if group != "" {
+			displayName = group + "/" + name
+		}
+		mdTitle = fmt.Sprintf("**%s %s**", statusIcon(status), displayName)
+		// feishu text messages do not render markdown; keep plain lines
+		plainLine = fmt.Sprintf("%s %s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+			statusIcon(status), displayName, status, pipeline, branch, image, commit)
+		mdLine = fmt.Sprintf("%s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+			mdTitle, status, pipeline, branch, image, commit)
 	}
-	displayName := name
-	if group != "" {
-		displayName = group + "/" + name
-	}
-	mdTitle := fmt.Sprintf("**%s %s**", statusIcon(status), displayName)
-	// feishu text messages do not render markdown; keep plain lines
-	plainLine := fmt.Sprintf("%s %s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
-		statusIcon(status), displayName, status, pipeline, branch, image, commit)
-	mdLine := fmt.Sprintf("%s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
-		mdTitle, status, pipeline, branch, image, commit)
 	var payload interface{}
 	switch typ {
 	case "feishu":
@@ -156,12 +199,19 @@ func sendEmail(cfg map[string]interface{}, ev Event) error {
 	status, _ := ev["status"].(string)
 	pipeline, _ := ev["pipelineId"].(float64)
 	repo, _ := ev["repo"].(string)
-	name := repo
-	if name == "" {
-		name = fmt.Sprintf("流水线 #%.0f", pipeline)
+	subject := ""
+	body := ""
+	if title, plain, _, isAgent := agentEvent(ev); isAgent {
+		subject = "[Navori] " + title
+		body = plain
+	} else {
+		name := repo
+		if name == "" {
+			name = fmt.Sprintf("流水线 #%.0f", pipeline)
+		}
+		subject = fmt.Sprintf("[Navori] %s 状态: %s", name, status)
+		body = fmt.Sprintf("流水线: %s (#%.0f)\n状态: %s\n镜像: %v\n错误: %v", name, pipeline, status, ev["imageTag"], ev["error"])
 	}
-	subject := fmt.Sprintf("[Navori] %s 状态: %s", name, status)
-	body := fmt.Sprintf("流水线: %s (#%.0f)\n状态: %s\n镜像: %v\n错误: %v", name, pipeline, status, ev["imageTag"], ev["error"])
 	msg := []byte("To: " + toRaw + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n")
 	auth := smtp.PlainAuth("", username, password, host)
 	if err := smtp.SendMail(addr, auth, from, strings.Split(toRaw, ","), msg); err != nil {

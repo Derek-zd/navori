@@ -10,7 +10,7 @@
 - 构建推送：docker/podman build + push，tag 模板（分支/commit/时间/全局变量/字面量）
 - 部署：kubectl set image + rollout status + 失败回滚
 - 审批：部署前人工审批（admin/user 两级）
-- 通知：跑完发 outgoing webhook（HMAC 签名）
+- 通知：跑完发 outgoing webhook（HMAC 签名）；可把执行器上线/离线告警投递到指定通道
 - 存储：SQLite（默认）/ MySQL 可选
 - 实时日志：SSE 流式输出
 

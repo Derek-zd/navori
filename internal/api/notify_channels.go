@@ -24,9 +24,10 @@ func (s *Server) listNotifyChannels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createNotifyChannel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name   string
-		Type   string
-		Config map[string]interface{}
+		Name         string
+		Type         string
+		Config       map[string]interface{}
+		SystemAlerts bool
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid body")
@@ -42,7 +43,7 @@ func (s *Server) createNotifyChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 		return
 	}
-	ch := store.NotifyChannel{Name: req.Name, Type: req.Type, ConfigJSON: enc}
+	ch := store.NotifyChannel{Name: req.Name, Type: req.Type, ConfigJSON: enc, SystemAlerts: req.SystemAlerts}
 	if err := s.DB.DB.Create(&ch).Error; err != nil {
 		fail(w, http.StatusConflict, "E_CONFLICT", err.Error())
 		return
@@ -78,9 +79,10 @@ func (s *Server) updateNotifyChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name   *string
-		Type   *string
-		Config map[string]interface{}
+		Name         *string
+		Type         *string
+		Config       map[string]interface{}
+		SystemAlerts *bool
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid body")
@@ -91,6 +93,9 @@ func (s *Server) updateNotifyChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type != nil {
 		ch.Type = *req.Type
+	}
+	if req.SystemAlerts != nil {
+		ch.SystemAlerts = *req.SystemAlerts
 	}
 	if req.Config != nil {
 		cfgJSON, _ := json.Marshal(req.Config)
@@ -148,9 +153,10 @@ func channelSummary(ch store.NotifyChannel, cfg map[string]interface{}) map[stri
 		}
 	}
 	return map[string]interface{}{
-		"id":     ch.ID,
-		"name":   ch.Name,
-		"type":   ch.Type,
-		"config": redact,
+		"id":           ch.ID,
+		"name":         ch.Name,
+		"type":         ch.Type,
+		"config":       redact,
+		"systemAlerts": ch.SystemAlerts,
 	}
 }

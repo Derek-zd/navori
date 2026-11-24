@@ -170,12 +170,13 @@ type AuditLog struct {
 
 // NotifyChannel is a reusable notification destination (REST/email/IM).
 type NotifyChannel struct {
-	ID         uint   `gorm:"primaryKey"`
-	Name       string `gorm:"size:64;uniqueIndex;not null"`
-	Type       string `gorm:"size:16;not null"` // rest | email | feishu | dingtalk | wecom
-	ConfigJSON string `gorm:"type:text"`        // encrypted config
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID           uint   `gorm:"primaryKey"`
+	Name         string `gorm:"size:64;uniqueIndex;not null"`
+	Type         string `gorm:"size:16;not null"` // rest | email | feishu | dingtalk | wecom
+	ConfigJSON   string `gorm:"type:text"`        // encrypted config
+	SystemAlerts bool   `gorm:"not null;default:false"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // AppConfig holds single-row application settings (e.g. global SMTP, storage
