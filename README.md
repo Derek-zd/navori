@@ -6,6 +6,14 @@
 
 单容器启动，SQLite 默认 / MySQL 可选，自带 Web 界面和实时日志。
 
+## 界面
+
+| 运行总览 | 流水线 |
+| :---: | :---: |
+| ![运行总览](docs/screenshots/dashboard.png) | ![流水线](docs/screenshots/pipelines.png) |
+| **运行详情：步骤时间线与实时日志** | **构建 / 部署执行器** |
+| ![运行详情](docs/screenshots/run-detail.png) | ![执行器](docs/screenshots/agents.png) |
+
 ## 功能
 
 - **仓库**：接入任意 git 源（HTTPS / SSH），自动扫描默认分支与 Dockerfile。
