@@ -88,8 +88,8 @@ type Pipeline struct {
 // Run is one pipeline execution.
 type Run struct {
 	ID                 uint   `gorm:"primaryKey"`
-	PipelineID         uint   `gorm:"index;not null"`
-	Number             int    `gorm:"not null"`
+	PipelineID         uint   `gorm:"uniqueIndex:idx_pipeline_number;not null"`
+	Number             int    `gorm:"uniqueIndex:idx_pipeline_number;not null"`
 	TriggerType        string `gorm:"size:16;not null"`
 	Ref                string `gorm:"size:256"`
 	Commit             string `gorm:"size:64"`
@@ -97,6 +97,7 @@ type Run struct {
 	ImageTag           string `gorm:"size:256"`
 	ConfigSnapshotJSON string `gorm:"type:text"`
 	ApprovalRequired   bool   `gorm:"not null;default:false"`
+	ApprovalDecision   string `gorm:"size:16;not null;default:''"`
 	ApprovedBy         string `gorm:"size:64"`
 	ApprovedAt         *time.Time
 	RejectedReason     string `gorm:"size:512"`

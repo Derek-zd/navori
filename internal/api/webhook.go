@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
@@ -11,7 +12,11 @@ import (
 )
 
 func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
+	if err != nil {
+		fail(w, http.StatusRequestEntityTooLarge, "E_VALIDATION", "webhook payload too large")
+		return
+	}
 	ref, commit, repoURL, valid := parseWebhook(body)
 	if !valid {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "unrecognized webhook payload")
@@ -28,7 +33,7 @@ func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		token = r.URL.Query().Get("token")
 	}
-	if token == "" || token != pipeline.WebhookToken {
+	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(pipeline.WebhookToken)) != 1 {
 		fail(w, http.StatusUnauthorized, "E_UNAUTHORIZED", "invalid webhook token")
 		return
 	}

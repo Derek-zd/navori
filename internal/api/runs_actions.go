@@ -24,6 +24,13 @@ func (s *Server) stopRun(w http.ResponseWriter, r *http.Request) {
 		ok(w, map[string]interface{}{"status": "cancelling"})
 		return
 	}
+	// Approval waits survive restarts without an in-memory cancel func, so a
+	// stop while awaiting approval must finalize the run in the database.
+	if run.Status == "awaiting_approval" && s.cancelAwaitingRun(&run) {
+		s.audit(r, "run.stop", strconv.FormatUint(uint64(id), 10))
+		ok(w, map[string]interface{}{"status": "cancelled"})
+		return
+	}
 	fail(w, http.StatusConflict, "E_RUN_STATE", "run is not running")
 }
 
@@ -36,6 +43,10 @@ func (s *Server) rerunRun(w http.ResponseWriter, r *http.Request) {
 	var run store.Run
 	if err := s.DB.DB.First(&run, id).Error; err != nil {
 		fail(w, http.StatusNotFound, "E_NOT_FOUND", "run not found")
+		return
+	}
+	if !isTerminalStep(run.Status) {
+		fail(w, http.StatusConflict, "E_RUN_STATE", "run is not finished")
 		return
 	}
 	var pipeline store.Pipeline
@@ -53,7 +64,7 @@ func (s *Server) rerunRun(w http.ResponseWriter, r *http.Request) {
 	branch := stripRef(run.Ref)
 	newRun, err := s.trigger(&pipeline, &repo, "rerun", run.Ref, branch, run.Commit, config)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
+		fail(w, http.StatusBadRequest, "E_VALIDATION", err.Error())
 		return
 	}
 	s.audit(r, "run.rerun", strconv.FormatUint(uint64(id), 10))

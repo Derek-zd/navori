@@ -54,7 +54,7 @@ func (s *Server) triggerScheduled(p *store.Pipeline) {
 		return
 	}
 	var last store.Run
-	if err := s.DB.DB.Where("pipeline_id = ?", p.ID).Order("id desc").First(&last).Error; err == nil && last.Commit != "" && last.Commit == head {
+	if err := s.DB.DB.Where("pipeline_id = ? AND ref = ?", p.ID, normalizeRef("", branch)).Order("id desc").First(&last).Error; err == nil && last.Commit != "" && last.Commit == head {
 		log.Printf("scheduled skip pipeline %d: no new commit %s", p.ID, head)
 		return // no new commit on the target branch
 	}

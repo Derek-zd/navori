@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -62,20 +63,42 @@ func compileGlob(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile(sb.String())
 }
 
-// Merge shallow-merges overrides into defaults. The "deploy" key is merged one level deep.
+// Merge merges branch overrides into defaults. "deploy", "execution" and
+// "variables" are merged one level deep; other keys replace the default.
 func Merge(defaults, overrides map[string]interface{}) map[string]interface{} {
 	out := copyMap(defaults)
 	for k, v := range overrides {
-		if k == "deploy" {
-			out["deploy"] = mergeDeploy(out["deploy"], v)
-		} else {
+		switch k {
+		case "deploy":
+			oldDeploy := toMap(out["deploy"])
+			o := toMap(v)
+			merged := mergeMap(oldDeploy, o)
+			// Switching target without an explicit namespace must not inherit
+			// the old target's namespace; let the deploy step fall back to the
+			// new target's default namespace instead. A workload-name-only
+			// override keeps the inherited namespace.
+			if _, hasNS := o["namespace"]; !hasNS {
+				targetChanged := false
+				if newTarget, hasTarget := o["targetId"]; hasTarget {
+					targetChanged = fmt.Sprint(newTarget) != fmt.Sprint(oldDeploy["targetId"])
+				} else if newName, hasName := o["name"]; hasName && oldDeploy["targetId"] == nil {
+					targetChanged = fmt.Sprint(newName) != fmt.Sprint(oldDeploy["name"])
+				}
+				if targetChanged {
+					merged["namespace"] = ""
+				}
+			}
+			out[k] = merged
+		case "execution", "variables":
+			out[k] = mergeMap(out[k], v)
+		default:
 			out[k] = v
 		}
 	}
 	return out
 }
 
-func mergeDeploy(d, o interface{}) map[string]interface{} {
+func mergeMap(d, o interface{}) map[string]interface{} {
 	merged := copyMap(toMap(d))
 	for k, v := range toMap(o) {
 		merged[k] = v

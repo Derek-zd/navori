@@ -32,12 +32,8 @@ type Server struct {
 	cancels  map[uint]context.CancelFunc
 	runWG    sync.WaitGroup
 
-	approveMu    sync.Mutex
-	approveChans map[uint]chan string
-
 	stepMu    sync.Mutex
 	stepWaits map[uint]chan stepResult
-
 }
 
 // Handler assembles the chi router.

@@ -120,3 +120,52 @@ func TestResolve(t *testing.T) {
 		t.Errorf("feature should not match release/*")
 	}
 }
+
+func TestMergeExecutionVariablesAndTargetNamespace(t *testing.T) {
+	defaults := map[string]interface{}{
+		"execution": map[string]interface{}{"buildAgent": "build=true"},
+		"variables": map[string]interface{}{"A": "1", "B": "2"},
+		"deploy":    map[string]interface{}{"targetId": float64(1), "namespace": "old", "kind": "Deployment"},
+	}
+	overrides := map[string]interface{}{
+		"execution": map[string]interface{}{"buildAgent": "agent=7"},
+		"variables": map[string]interface{}{"B": "3"},
+		"deploy":    map[string]interface{}{"targetId": float64(2)},
+	}
+	out := Merge(defaults, overrides)
+	exec := toMap(out["execution"])
+	if exec["buildAgent"] != "agent=7" {
+		t.Fatalf("execution not merged: %#v", exec)
+	}
+	vars := toMap(out["variables"])
+	if vars["A"] != "1" || vars["B"] != "3" {
+		t.Fatalf("variables not merged: %#v", vars)
+	}
+	deploy := toMap(out["deploy"])
+	if deploy["targetId"] != float64(2) || deploy["kind"] != "Deployment" {
+		t.Fatalf("deploy not merged: %#v", deploy)
+	}
+	if deploy["namespace"] != "" {
+		t.Fatalf("target switch kept old namespace: %#v", deploy)
+	}
+}
+
+func TestMergeKeepsNamespaceWhenExplicit(t *testing.T) {
+	defaults := map[string]interface{}{"deploy": map[string]interface{}{"targetId": float64(1), "namespace": "old"}}
+	out := Merge(defaults, map[string]interface{}{"deploy": map[string]interface{}{"targetId": float64(2), "namespace": "new"}})
+	if got := toMap(out["deploy"])["namespace"]; got != "new" {
+		t.Fatalf("explicit namespace = %v", got)
+	}
+}
+
+func TestMergeKeepsNamespaceWhenOnlyWorkloadChanges(t *testing.T) {
+	defaults := map[string]interface{}{"deploy": map[string]interface{}{"targetId": float64(1), "namespace": "prod", "name": "old-app"}}
+	out := Merge(defaults, map[string]interface{}{"deploy": map[string]interface{}{"name": "new-app"}})
+	deploy := toMap(out["deploy"])
+	if deploy["namespace"] != "prod" {
+		t.Fatalf("workload-only override cleared namespace: %#v", deploy)
+	}
+	if deploy["name"] != "new-app" {
+		t.Fatalf("workload name not merged: %#v", deploy)
+	}
+}

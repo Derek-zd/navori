@@ -21,8 +21,9 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(runs))
+	agentNames := s.agentNameMap()
 	for _, v := range runs {
-		out = append(out, s.runJSON(v))
+		out = append(out, s.runJSONWithAgents(v, agentNames))
 	}
 	ok(w, out)
 }
@@ -41,15 +42,23 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	ok(w, s.runJSON(run))
 }
 
-func (s *Server) runJSON(v store.Run) map[string]interface{} {
-	var steps []store.Step
-	s.DB.DB.Where("run_id = ?", v.ID).Order("step_order").Find(&steps)
-	agentNames := map[uint]string{}
+func (s *Server) agentNameMap() map[uint]string {
+	names := map[uint]string{}
 	var agents []store.Agent
 	s.DB.DB.Find(&agents)
 	for _, a := range agents {
-		agentNames[a.ID] = a.Name
+		names[a.ID] = a.Name
 	}
+	return names
+}
+
+func (s *Server) runJSON(v store.Run) map[string]interface{} {
+	return s.runJSONWithAgents(v, s.agentNameMap())
+}
+
+func (s *Server) runJSONWithAgents(v store.Run, agentNames map[uint]string) map[string]interface{} {
+	var steps []store.Step
+	s.DB.DB.Where("run_id = ?", v.ID).Order("step_order").Find(&steps)
 	stepOut := make([]map[string]interface{}, 0, len(steps))
 	for _, st := range steps {
 		out := map[string]interface{}{
@@ -77,6 +86,7 @@ func (s *Server) runJSON(v store.Run) map[string]interface{} {
 		"imageTag":         v.ImageTag,
 		"error":            v.Error,
 		"approvalRequired": v.ApprovalRequired,
+		"approvalDecision": v.ApprovalDecision,
 		"approvedBy":       v.ApprovedBy,
 		"approvedAt":       v.ApprovedAt,
 		"rejectedReason":   v.RejectedReason,

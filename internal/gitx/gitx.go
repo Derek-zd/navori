@@ -81,16 +81,42 @@ func runW(dir string, w io.Writer, args ...string) error {
 
 // RemoteBranchHead returns the commit sha a branch points at on the remote.
 func RemoteBranchHead(url, branch string) (string, error) {
-	cmd := exec.Command("git", "ls-remote", url, "refs/heads/"+branch)
-	out, err := cmd.Output()
+	return RemoteRefHead(url, "refs/heads/"+branch)
+}
+
+// RemoteRefHead returns the commit sha an explicit git ref points at.
+func RemoteRefHead(url, ref string) (string, error) {
+	out, err := exec.Command("git", "ls-remote", url, ref).Output()
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s: %w", branch, err)
+		return "", fmt.Errorf("git ls-remote %s: %w", ref, err)
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
 	if len(fields) == 0 {
-		return "", fmt.Errorf("git ls-remote %s: branch not found", branch)
+		return "", fmt.Errorf("git ls-remote %s: ref not found", ref)
 	}
 	return fields[0], nil
+}
+
+// RemoteAnyRefHead resolves the commit for a ref supplied by a user. A full
+// refs/... path is used as-is; a short name is tried as a branch first and
+// then as a tag, which matches what "git clone --branch <name>" accepts.
+func RemoteAnyRefHead(url, ref, branch string) (string, error) {
+	if strings.HasPrefix(ref, "refs/") {
+		return RemoteRefHead(url, ref)
+	}
+	name := branch
+	if name == "" {
+		name = ref
+	}
+	if name != "" {
+		if sha, err := RemoteRefHead(url, "refs/heads/"+name); err == nil {
+			return sha, nil
+		}
+		if sha, err := RemoteRefHead(url, "refs/tags/"+name); err == nil {
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("git ref %q not found on remote", ref)
 }
 
 // BranchExists reports whether branch exists on the remote.

@@ -150,11 +150,12 @@ func (s *Server) executeStep(ctx context.Context, run *store.Run, repo *store.Re
 		stepErr = s.dispatchStep(ctx, step)
 	} else {
 		rc := parseResolvedConfig(config)
+		dir := s.runRepoDir(run.ID, repo.ID)
 		switch step.Name {
 		case "pull":
-			stepErr = s.stepPull(ctx, f, repo, branch)
+			stepErr = s.stepPull(ctx, f, repo, branch, dir)
 		case "build":
-			stepErr = s.stepBuild(ctx, f, repo, rc, imageTag)
+			stepErr = s.stepBuild(ctx, f, repo, rc, imageTag, dir)
 		case "push":
 			stepErr = s.stepPush(ctx, f, rc, imageTag)
 		case "approve":
@@ -189,15 +190,15 @@ func (s *Server) executeStep(ctx context.Context, run *store.Run, repo *store.Re
 	return nil
 }
 
-func (s *Server) stepPull(ctx context.Context, w io.Writer, repo *store.Repository, branch string) error {
+func (s *Server) stepPull(ctx context.Context, w io.Writer, repo *store.Repository, branch, dir string) error {
 	return runner.Pull(ctx, w, runner.PullSpec{
 		GitURL: s.cloneURL(repo),
 		Branch: branch,
-		Dir:    s.repoDir(repo.ID),
+		Dir:    dir,
 	})
 }
 
-func (s *Server) stepBuild(ctx context.Context, w io.Writer, repo *store.Repository, rc resolvedConfig, imageTag string) error {
+func (s *Server) stepBuild(ctx context.Context, w io.Writer, repo *store.Repository, rc resolvedConfig, imageTag, dir string) error {
 	dockerfile := rc.DockerfilePath
 	if dockerfile == "" {
 		dockerfile = repo.DockerfilePath
@@ -206,7 +207,7 @@ func (s *Server) stepBuild(ctx context.Context, w io.Writer, repo *store.Reposit
 		dockerfile = "Dockerfile"
 	}
 	return runner.Build(ctx, w, runner.BuildSpec{
-		Dir:             s.repoDir(repo.ID),
+		Dir:             dir,
 		Dockerfile:      dockerfile,
 		Image:           imageTag,
 		Platform:        rc.Platform,
@@ -228,42 +229,63 @@ func (s *Server) stepPush(ctx context.Context, w io.Writer, rc resolvedConfig, i
 	return runner.Push(ctx, w, sp)
 }
 
-// stepApprove sets run to awaiting_approval and waits for an approve/reject decision.
+// stepApprove persists the wait state and polls the database for a human
+// decision. Polling (instead of an in-memory channel) means an approval that
+// arrives days later, or after a server restart, is never lost.
 func (s *Server) stepApprove(ctx context.Context, w io.Writer, run *store.Run, step *store.Step) error {
 	s.DB.DB.Model(run).Updates(map[string]interface{}{"status": "awaiting_approval"})
 	s.DB.DB.Model(step).Updates(map[string]interface{}{"status": "awaiting_approval"})
 	fmt.Fprintf(w, "等待人工审批...\n")
 	go s.notifyApproval(run, "approval.requested", "awaiting_approval")
+	return s.waitApproval(ctx, w, run)
+}
 
-	ch := make(chan string, 1)
-	s.approveMu.Lock()
-	if s.approveChans == nil {
-		s.approveChans = make(map[uint]chan string)
-	}
-	s.approveChans[run.ID] = ch
-	s.approveMu.Unlock()
-	defer func() {
-		s.approveMu.Lock()
-		delete(s.approveChans, run.ID)
-		s.approveMu.Unlock()
-	}()
-
-	select {
-	case decision := <-ch:
+func (s *Server) waitApproval(ctx context.Context, w io.Writer, run *store.Run) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
 		var fresh store.Run
-		s.DB.DB.First(&fresh, run.ID)
-		approvedAt := ""
-		if fresh.ApprovedAt != nil {
-			approvedAt = fresh.ApprovedAt.Format(time.RFC3339)
+		if err := s.DB.DB.First(&fresh, run.ID).Error; err != nil {
+			return err
 		}
-		if decision == "approve" {
-			fmt.Fprintf(w, "审批通过  审批人=%s  时间=%s\n", fresh.ApprovedBy, approvedAt)
+		if fresh.Status != "awaiting_approval" {
+			switch fresh.Status {
+			case "cancelled":
+				return errStepCancelled
+			case "rejected":
+				return errRejected
+			}
 			return nil
 		}
-		fmt.Fprintf(w, "审批拒绝  审批人=%s  时间=%s  原因=%s\n", fresh.ApprovedBy, approvedAt, fresh.RejectedReason)
-		return errRejected
-	case <-ctx.Done():
-		return ctx.Err()
+		switch fresh.ApprovalDecision {
+		case "approved":
+			res := s.DB.DB.Model(&store.Run{}).
+				Where("id = ? AND status = ?", run.ID, "awaiting_approval").
+				Updates(map[string]interface{}{"status": "running"})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected > 0 {
+				approvedAt := ""
+				if fresh.ApprovedAt != nil {
+					approvedAt = fresh.ApprovedAt.Format(time.RFC3339)
+				}
+				fmt.Fprintf(w, "审批通过  审批人=%s  时间=%s\n", fresh.ApprovedBy, approvedAt)
+				return nil
+			}
+		case "rejected":
+			approvedAt := ""
+			if fresh.ApprovedAt != nil {
+				approvedAt = fresh.ApprovedAt.Format(time.RFC3339)
+			}
+			fmt.Fprintf(w, "审批拒绝  审批人=%s  时间=%s  原因=%s\n", fresh.ApprovedBy, approvedAt, fresh.RejectedReason)
+			return errRejected
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -501,9 +523,28 @@ func (s *Server) cancelRun(runID uint) bool {
 	return false
 }
 
-// ReapInFlight marks runs interrupted by a restart as failed.
+// ReapInFlight marks runs interrupted by a restart as failed and releases the
+// steps they left behind. Runs waiting for a human decision are deliberately
+// left alone: their wait is durable and ResumeApprovals will restore it.
 func (s *Server) ReapInFlight() {
-	s.DB.DB.Model(&store.Run{}).
-		Where("status IN ?", []string{"running", "pending"}).
+	var runs []store.Run
+	if err := s.DB.DB.Where("status IN ?", []string{"running", "pending"}).Find(&runs).Error; err != nil {
+		log.Printf("reap in-flight runs: %v", err)
+		return
+	}
+	ids := make([]uint, 0, len(runs))
+	for i := range runs {
+		ids = append(ids, runs[i].ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	s.DB.DB.Model(&store.Run{}).Where("id IN ?", ids).
 		Updates(map[string]interface{}{"status": "failed", "error": "service restarted during run", "finished_at": nowPtr()})
+	s.DB.DB.Model(&store.Step{}).
+		Where("run_id IN ? AND status IN ?", ids, []string{"running", "queued"}).
+		Updates(map[string]interface{}{"status": "cancelled", "lease_expires_at": nil, "finished_at": nowPtr()})
+	s.DB.DB.Model(&store.Step{}).
+		Where("run_id IN ? AND status IN ?", ids, []string{"pending", "awaiting_approval"}).
+		Updates(map[string]interface{}{"status": "skipped", "lease_expires_at": nil})
 }

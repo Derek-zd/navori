@@ -178,7 +178,7 @@ func (s *Server) buildJob(step *store.Step, run *store.Run) (agentx.Job, error) 
 		_ = json.Unmarshal([]byte(run.ConfigSnapshotJSON), &cfg)
 	}
 	rc := parseResolvedConfig(cfg)
-	dir := filepath.ToSlash(filepath.Join("workspace", strconv.FormatUint(uint64(repo.ID), 10)))
+	dir := filepath.ToSlash(filepath.Join("workspace", strconv.FormatUint(uint64(repo.ID), 10), strconv.FormatUint(uint64(run.ID), 10)))
 
 	var params interface{}
 	switch step.Name {

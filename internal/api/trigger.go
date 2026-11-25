@@ -21,6 +21,12 @@ func (s *Server) repoDir(repoID uint) string {
 	return filepath.Join(s.Cfg.DataDir, "repos", strconv.FormatUint(uint64(repoID), 10))
 }
 
+// runRepoDir isolates concurrent runs of the same repository. The base repoDir
+// is still used for metadata scans and as a backwards-compatible cache.
+func (s *Server) runRepoDir(runID, repoID uint) string {
+	return filepath.Join(s.repoDir(repoID), "runs", strconv.FormatUint(uint64(runID), 10))
+}
+
 // resolveForBranch returns the effective config and whether branch triggers.
 func (s *Server) resolveForBranch(p *store.Pipeline, repo *store.Repository, branch string) (map[string]interface{}, bool) {
 	var defaults map[string]interface{}
@@ -71,9 +77,15 @@ func (s *Server) pickRunBranch(p *store.Pipeline, repo *store.Repository) string
 	var brs []rules.Rule
 	_ = json.Unmarshal([]byte(p.BranchRulesJSON), &brs)
 	url := s.cloneURL(repo)
+	branchCache := map[string]bool{}
 	exists := func(b string) bool {
+		if v, ok := branchCache[b]; ok {
+			return v
+		}
 		ok, err := gitx.BranchExists(url, b)
-		return err == nil && ok
+		v := err == nil && ok
+		branchCache[b] = v
+		return v
 	}
 	if b := rules.PickExactBranch(brs, exists); b != "" {
 		return b
@@ -114,6 +126,13 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 	// refs/heads/<branch> from the resolved branch (webhook refs already carry
 	// the full ref).
 	ref = normalizeRef(ref, branch)
+	if commit == "" {
+		sha, err := gitx.RemoteAnyRefHead(s.cloneURL(repo), ref, branch)
+		if err != nil {
+			return nil, fmt.Errorf("resolve commit for %s: %w", ref, err)
+		}
+		commit = sha
+	}
 	if err := validateExecution(config); err != nil {
 		return nil, err
 	}
@@ -125,19 +144,6 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 
 	now := time.Now()
 	cfgJSON, _ := json.Marshal(config)
-	run := store.Run{
-		PipelineID:         p.ID,
-		Number:             nextRunNumber(s.DB.DB, p.ID),
-		TriggerType:        triggerType,
-		Ref:                ref,
-		Commit:             commit,
-		Status:             "running",
-		ConfigSnapshotJSON: string(cfgJSON),
-		StartedAt:          &now,
-	}
-	if err := s.DB.DB.Create(&run).Error; err != nil {
-		return nil, err
-	}
 	stepNames := []string{"pull", "build", "push"}
 	if rc.Deploy.TargetID != 0 || rc.Deploy.Name != "" {
 		if rc.Deploy.Approval {
@@ -145,18 +151,44 @@ func (s *Server) trigger(p *store.Pipeline, repo *store.Repository, triggerType,
 		}
 		stepNames = append(stepNames, "deploy")
 	}
-	for i, name := range stepNames {
-		selector := ""
-		switch name {
-		case "pull", "build", "push":
-			selector = rc.Execution.BuildAgent
-		case "deploy":
-			if deployAgentID > 0 {
-				selector = agentx.AgentSelector(deployAgentID)
+	var run store.Run
+	for attempt := 0; attempt < 3; attempt++ {
+		err := s.DB.DB.Transaction(func(tx *gorm.DB) error {
+			run = store.Run{
+				PipelineID:         p.ID,
+				Number:             nextRunNumber(tx, p.ID),
+				TriggerType:        triggerType,
+				Ref:                ref,
+				Commit:             commit,
+				Status:             "running",
+				ConfigSnapshotJSON: string(cfgJSON),
+				ApprovalRequired:   (rc.Deploy.TargetID != 0 || rc.Deploy.Name != "") && rc.Deploy.Approval,
+				StartedAt:          &now,
 			}
+			if err := tx.Create(&run).Error; err != nil {
+				return err
+			}
+			for i, name := range stepNames {
+				selector := ""
+				switch name {
+				case "pull", "build", "push":
+					selector = rc.Execution.BuildAgent
+				case "deploy":
+					if deployAgentID > 0 {
+						selector = agentx.AgentSelector(deployAgentID)
+					}
+				}
+				step := store.Step{RunID: run.ID, StepOrder: i + 1, Name: name, Status: "pending", AgentSelector: selector}
+				if err := tx.Create(&step).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err == nil {
+			break
 		}
-		step := store.Step{RunID: run.ID, StepOrder: i + 1, Name: name, Status: "pending", AgentSelector: selector}
-		if err := s.DB.DB.Create(&step).Error; err != nil {
+		if !isDuplicateError(err) || attempt == 2 {
 			return nil, err
 		}
 	}
@@ -202,7 +234,7 @@ func (s *Server) deployAgentForConfig(rc resolvedConfig) (uint, error) {
 
 // triggerWebhook creates a run unless the commit was already processed (dedup).
 func (s *Server) triggerWebhook(p *store.Pipeline, repo *store.Repository, ref, branch, commit string, config map[string]interface{}) (*store.Run, bool, error) {
-	digest := strconv.FormatUint(uint64(p.ID), 10) + ":" + commit
+	digest := strconv.FormatUint(uint64(p.ID), 10) + ":" + ref + ":" + commit
 	ev := store.WebhookEvent{PipelineID: p.ID, PayloadDigest: digest}
 	if err := s.DB.DB.Create(&ev).Error; err != nil {
 		// A duplicate is only a skip when a webhook run for this commit was
@@ -214,7 +246,7 @@ func (s *Server) triggerWebhook(p *store.Pipeline, repo *store.Repository, ref, 
 		}
 		var delivered int64
 		if countErr := s.DB.DB.Model(&store.Run{}).
-			Where("pipeline_id = ? AND runs.`commit` = ? AND trigger_type = ?", p.ID, commit, "webhook").
+			Where("pipeline_id = ? AND ref = ? AND runs.`commit` = ? AND trigger_type = ?", p.ID, ref, commit, "webhook").
 			Count(&delivered).Error; countErr != nil {
 			return nil, false, countErr
 		}
@@ -298,6 +330,11 @@ func embedToken(url, username, secret string) string {
 		return url[:i+3] + username + ":" + secret + "@" + url[i+3:]
 	}
 	return url
+}
+
+func isDuplicateError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "duplicate entry") || strings.Contains(msg, "database is locked")
 }
 
 func nextRunNumber(db *gorm.DB, pipelineID uint) int {

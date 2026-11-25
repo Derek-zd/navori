@@ -84,7 +84,7 @@ func TestClaimStepMatchesSelector(t *testing.T) {
 	if err := job.DecodeParams(&p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Branch != "main" || p.GitURL != repo.GitURL || p.Dir != "workspace/"+strconv.FormatUint(uint64(repo.ID), 10) {
+	if p.Branch != "main" || p.GitURL != repo.GitURL || p.Dir != "workspace/"+strconv.FormatUint(uint64(repo.ID), 10)+"/"+strconv.FormatUint(uint64(run.ID), 10) {
 		t.Fatalf("unexpected pull params: %+v", p)
 	}
 

@@ -16,6 +16,7 @@
 | 2026-11-23 | Webhook 明确成功 202 / 跳过 200 并返回 `reason`、`branch`；执行器 selector 支持 `agent=<id>` |
 | 2026-11-24 | 通知通道新增 `systemAlerts`；新增 §11.2 执行器上线/离线告警事件 |
 | 2026-11-24 | 部署目标新增 `agentId` 绑定执行器；部署步骤由目标自动派生执行器，流水线移除 `execution.deployAgent`；`POST /api/deploy-targets/{id}/test` 支持经绑定 agent 远程测试 |
+| 2026-11-25 | 审批决策持久化（`Run.approvalDecision`，重启恢复，重复决定 409）；分支覆盖按 deploy/execution/variables 深合并；新增 Dockerfile/构建上下文默认与分支覆盖；webhook/cron 去重带 ref |
 
 ---
 
@@ -206,7 +207,8 @@ PipelineConfig（defaults）= {
   // 未绑定时服务端本机执行；agent 不存在/禁用时触发失败。approve 永远在服务端。
 }
 
-BranchRule = { branch: glob, overrides: Partial<PipelineConfig> }  // 浅合并覆盖 defaults；顺序敏感
+BranchRule = { branch: glob, overrides: Partial<PipelineConfig> }  // 按顺序首个命中；deploy/execution/variables 深合并，其余字段覆盖 defaults
+    // 分支覆盖 deploy.targetId 且未显式写 namespace 时，namespace 置空并回退新 target 的默认命名空间
 
 NotifyConfig = { webhookUrl, secret, on: ["success","failure","cancelled","rejected"] }
 
@@ -223,6 +225,8 @@ POST /api/runs/{id}/stop → 200 { data: { status: "cancelling" } }
 POST /api/runs/{id}/approve → 200 { data: Run }        // 仅 awaiting_approval；admin 或 approvers
 POST /api/runs/{id}/reject
     body: { reason? } → 200 { data: Run }
+    // 审批决策持久化在 Run.approvalDecision；重复 approve/reject 返回 409 E_RUN_STATE
+    // awaiting_approval 跨 server 重启保留：启动时恢复等待，已决定则继续 deploy 或 rejected
 POST /api/runs/{id}/rerun → 202 { data: { runId, number } }  // 回放快照（同 commit + 同解析配置）
 GET /api/runs/{id}/logs → SSE（见 9.1）
 
@@ -230,12 +234,13 @@ Run = {
   id, pipelineId, number,
   triggerType: "manual" | "webhook" | "cron" | "rerun",
   ref, commit, commitShort, status, imageTag, error,
-  approvalRequired, approvedBy, approvedAt, rejectedReason,
+  approvalRequired, approvalDecision, approvedBy, approvedAt, rejectedReason,
   startedAt, finishedAt,
   steps: [Step]
 }
 
 status: pending | running | awaiting_approval | success | failed | cancelled | rejected
+approvalDecision: "" | "approved" | "rejected"   // awaiting 期间为空；决定后保持，便于重启恢复
 
 Step = { name: "pull" | "build" | "push" | "approve" | "deploy", status, startedAt, finishedAt,
          agentId, agentName?, agentSelector, attempt }

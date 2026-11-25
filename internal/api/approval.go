@@ -11,36 +11,17 @@ import (
 )
 
 func (s *Server) approveRun(w http.ResponseWriter, r *http.Request) {
-	id, err := idParam(r)
-	if err != nil {
-		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid id")
-		return
-	}
-	var run store.Run
-	if err := s.DB.DB.First(&run, id).Error; err != nil {
-		fail(w, http.StatusNotFound, "E_NOT_FOUND", "run not found")
-		return
-	}
-	if run.Status != "awaiting_approval" {
-		fail(w, http.StatusConflict, "E_RUN_STATE", "run is not awaiting approval")
-		return
-	}
-	claims := claimsFrom(r)
-	if !s.canApprove(&run, claims) {
-		fail(w, http.StatusForbidden, "E_FORBIDDEN", "not allowed to approve")
-		return
-	}
-	now := time.Now()
-	s.DB.DB.Model(&run).Updates(map[string]interface{}{"approved_by": claims.Username, "approved_at": &now})
-	if !s.decideRun(id, "approve") {
-		fail(w, http.StatusConflict, "E_RUN_STATE", "no pending approval")
-		return
-	}
-	s.audit(r, "approve", runTarget(id))
-	go s.notifyApproval(&run, "approval.approved", "approved")
-	ok(w, s.runJSON(run))
+	s.decideApproval(w, r, "approved")
 }
+
 func (s *Server) rejectRun(w http.ResponseWriter, r *http.Request) {
+	s.decideApproval(w, r, "rejected")
+}
+
+// decideApproval persists the human decision. The execution goroutine (or the
+// startup recovery loop) observes it and continues the run, so a decision
+// survives a server restart and is never kept only in memory.
+func (s *Server) decideApproval(w http.ResponseWriter, r *http.Request, decision string) {
 	id, err := idParam(r)
 	if err != nil {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid id")
@@ -60,33 +41,53 @@ func (s *Server) rejectRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "E_FORBIDDEN", "not allowed to approve")
 		return
 	}
-	now := time.Now()
+
 	var req struct {
 		Reason string
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	s.DB.DB.Model(&run).Updates(map[string]interface{}{"approved_by": claims.Username, "approved_at": &now, "rejected_reason": req.Reason})
-	if !s.decideRun(id, "reject") {
-		fail(w, http.StatusConflict, "E_RUN_STATE", "no pending approval")
+	if decision == "rejected" {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{
+		"approval_decision": decision,
+		"approved_by":       claims.Username,
+		"approved_at":       &now,
+	}
+	if decision == "rejected" {
+		updates["rejected_reason"] = req.Reason
+	}
+	res := s.DB.DB.Model(&store.Run{}).
+		Where("id = ? AND status = ? AND approval_decision = ?", id, "awaiting_approval", "").
+		Updates(updates)
+	if res.Error != nil {
+		fail(w, http.StatusInternalServerError, "E_INTERNAL", res.Error.Error())
 		return
 	}
-	s.audit(r, "reject", runTarget(id))
-	go s.notifyApproval(&run, "approval.rejected", "rejected_approval")
+	if res.RowsAffected == 0 {
+		fail(w, http.StatusConflict, "E_RUN_STATE", "approval already decided")
+		return
+	}
+	if err := s.DB.DB.First(&run, id).Error; err != nil {
+		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
+		return
+	}
+	action := "approve"
+	event := "approval.approved"
+	status := "approved"
+	if decision == "rejected" {
+		action = "reject"
+		event = "approval.rejected"
+		status = "rejected_approval"
+	}
+	s.audit(r, action, runTarget(id))
+	go s.notifyApproval(&run, event, status)
 	ok(w, s.runJSON(run))
 }
+
 func runTarget(id uint) string {
 	return "run " + strconv.FormatUint(uint64(id), 10)
-}
-
-func (s *Server) decideRun(id uint, decision string) bool {
-	s.approveMu.Lock()
-	ch, ok := s.approveChans[id]
-	s.approveMu.Unlock()
-	if !ok {
-		return false
-	}
-	ch <- decision
-	return true
 }
 
 func (s *Server) canApprove(run *store.Run, claims *auth.Claims) bool {

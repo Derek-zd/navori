@@ -145,6 +145,12 @@ func (s *Server) deleteRepository(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "E_VALIDATION", "invalid id")
 		return
 	}
+	var pipelineCount int64
+	s.DB.DB.Model(&store.Pipeline{}).Where("repo_id = ?", id).Count(&pipelineCount)
+	if pipelineCount > 0 {
+		fail(w, http.StatusConflict, "E_CONFLICT", "repository still has pipelines")
+		return
+	}
 	if err := s.DB.DB.Delete(&store.Repository{}, id).Error; err != nil {
 		fail(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
 		return
