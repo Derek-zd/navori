@@ -16,7 +16,7 @@
 | 2026-11-23 | Webhook 明确成功 202 / 跳过 200 并返回 `reason`、`branch`；执行器 selector 支持 `agent=<id>` |
 | 2026-11-24 | 通知通道新增 `systemAlerts`；新增 §11.2 执行器上线/离线告警事件 |
 | 2026-11-24 | 部署目标新增 `agentId` 绑定执行器；部署步骤由目标自动派生执行器，流水线移除 `execution.deployAgent`；`POST /api/deploy-targets/{id}/test` 支持经绑定 agent 远程测试 |
-| 2026-11-25 | 审批决策持久化（`Run.approvalDecision`，重启恢复，重复决定 409）；分支覆盖按 deploy/execution/variables 深合并；新增 Dockerfile/构建上下文默认与分支覆盖；webhook/cron 去重带 ref |
+| 2026-11-25 | 审批决策持久化（`Run.approvalDecision`，重启恢复，重复决定 409）；流水线分支配置改为每条分支完整配置（`config` 只保留全分支共用字段，`branchRules[].overrides` 保存构建/部署）；webhook/cron 去重带 ref |
 | 2026-11-25 | 通知增加部署信息：`run.finished` 可带 `deploy` 对象（集群/服务/命名空间/状态/执行器/错误），IM 与邮件同步展示 |
 
 ---
@@ -209,6 +209,9 @@ PipelineConfig（defaults）= {
 }
 
 BranchRule = { branch: glob, overrides: Partial<PipelineConfig> }  // 按顺序首个命中；deploy/execution/variables 深合并，其余字段覆盖 defaults
+    // 新编辑器（2026-11-25 起）把每条分支写成完整 overrides：dockerfilePath / execution.buildAgent /
+    // deploy{targetId,name,namespace,kind,approval}；顶层 config 仅保留 imageName/tagTemplate/registryId/variables。
+    // 旧配置仍按 overrides 合并 defaults 读取；buildContext 不再由新编辑器写入，构建上下文固定为仓库根。
     // 分支覆盖 deploy.targetId 且未显式写 namespace 时，namespace 置空并回退新 target 的默认命名空间
 
 NotifyConfig = { webhookUrl, secret, on: ["success","failure","cancelled","rejected"] }

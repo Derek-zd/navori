@@ -40,8 +40,6 @@ const ALL_NOTIFY_EVENTS = NOTIFY_EVENTS.map(([ev]) => ev)
 type BranchDraft = {
   branch: string
   overrides: Record<string, any>
-  buildOn: boolean
-  deployOn: boolean
 }
 
 const TAG_VARS: Record<string, string> = {
@@ -69,16 +67,7 @@ export default function Pipelines() {
   const [registryId, setRegistryId] = useState(0)
   const [imageName, setImageName] = useState('')
   const [tagTemplate, setTagTemplate] = useState('{branch}-{commit_short}')
-  const [deployTargetId, setDeployTargetId] = useState(0)
-  const [deployName, setDeployName] = useState('')
-  const [deployNamespace, setDeployNamespace] = useState('')
-  const [deployKind, setDeployKind] = useState('Deployment')
-  const [approval, setApproval] = useState(false)
-  const [buildAgent, setBuildAgent] = useState('')
-  const [dockerfilePath, setDockerfilePath] = useState('')
-  const [buildContext, setBuildContext] = useState('')
-  const [branches, setBranches] = useState<BranchDraft[]>([{ branch: '**', overrides: {}, buildOn: false, deployOn: false }])
-  const [formTab, setFormTab] = useState<'default' | 'branches'>('default')
+  const [branches, setBranches] = useState<BranchDraft[]>([{ branch: 'main', overrides: {} }])
   const [group, setGroup] = useState('')
   const [scheduleCron, setScheduleCron] = useState('')
   const [notifyChannels, setNotifyChannels] = useState<NotifyChannel[]>([])
@@ -195,6 +184,15 @@ export default function Pipelines() {
     return `构建：${build || '服务端本机'}；部署：${deployTargetName(targetId) || '未配置'} → ${deployAgentName(targetId)}`
   }
 
+  function pipelineSummaryConfig(p: Pipeline) {
+    const cfg = (p.config || {}) as Record<string, any>
+    const first = ((p.branchRules?.[0]?.overrides || {}) as Record<string, any>)
+    return {
+      d: { ...(cfg.deploy || {}), ...(first.deploy || {}) } as Record<string, any>,
+      ex: { ...(cfg.execution || {}), ...(first.execution || {}) } as Record<string, any>,
+    }
+  }
+
   function executionField(label: string, value: string, onChange: (v: string) => void, hint: string) {
     const id = selectorAgentID(value)
     const known = id !== null && agents.some((a) => a.id === id)
@@ -272,16 +270,7 @@ export default function Pipelines() {
     setRegistryId(0)
     setImageName('')
     setTagTemplate('{branch}-{commit_short}')
-    setDeployTargetId(0)
-    setDeployName('')
-    setDeployNamespace('')
-    setDeployKind('Deployment')
-    setApproval(false)
-    setBuildAgent('')
-    setDockerfilePath('')
-    setBuildContext('')
-    setBranches([{ branch: '**', overrides: {}, buildOn: false, deployOn: false }])
-    setFormTab('default')
+    setBranches([{ branch: 'main', overrides: {} }])
     setGroup('')
     setScheduleCron('')
     setPipeVars([])
@@ -301,28 +290,31 @@ export default function Pipelines() {
     setRegistryId(Number(cfg.registryId || 0))
     setImageName(String(cfg.imageName || ''))
     setTagTemplate(String(cfg.tagTemplate || '{branch}-{commit_short}'))
-    const d = (cfg.deploy || {}) as Record<string, any>
-    setDeployTargetId(Number(d.targetId || 0))
-    setDeployName(String(d.name || ''))
-    setDeployNamespace(String(d.namespace || ''))
-    setDeployKind(String(d.kind || 'Deployment'))
-    setApproval(Boolean(d.approval))
-    const ex = (cfg.execution || {}) as Record<string, any>
-    setBuildAgent(String(ex.buildAgent || ''))
-    setDockerfilePath(String(cfg.dockerfilePath || ''))
-    setBuildContext(String(cfg.buildContext || ''))
-    setBranches((p.branchRules || []).map((r) => {
-      const o = (r.overrides || {}) as Record<string, any>
-      const exec = (o.execution || {}) as Record<string, any>
-      const dep = (o.deploy || {}) as Record<string, any>
-      return {
-        branch: r.branch,
-        overrides: o,
-        buildOn: Boolean(o.dockerfilePath || o.buildContext || exec.buildAgent),
-        deployOn: Boolean(dep.targetId !== undefined || dep.name !== undefined),
+    const baseDeploy = (cfg.deploy || {}) as Record<string, any>
+    const baseExec = (cfg.execution || {}) as Record<string, any>
+    const baseDockerfile = String(cfg.dockerfilePath || '')
+    const repo = repos.find((r) => r.id === p.repoId)
+    const rawRules = p.branchRules && p.branchRules.length > 0
+      ? p.branchRules
+      : [{ branch: repo?.defaultBranch || 'main', overrides: {} as Record<string, unknown> }]
+    setBranches(rawRules.map((r) => {
+      const o = JSON.parse(JSON.stringify(r.overrides || {})) as Record<string, any>
+      if (!o.dockerfilePath && baseDockerfile) o.dockerfilePath = baseDockerfile
+      if (!o.execution?.buildAgent && baseExec.buildAgent) o.execution = { ...(o.execution || {}), buildAgent: baseExec.buildAgent }
+      const branchDeploy = (o.deploy || {}) as Record<string, any>
+      const noDeploy = o.deploy !== undefined && Number(branchDeploy.targetId || 0) === 0 && String(branchDeploy.name || '') === ''
+      if (noDeploy) {
+        o.deploy = { targetId: 0, name: '' }
+      } else {
+        const merged = { ...baseDeploy, ...branchDeploy }
+        for (const key of ['kind', 'name', 'namespace']) {
+          if (!merged[key]) merged[key] = baseDeploy[key]
+        }
+        if (Number(merged.targetId || 0) > 0 || String(merged.name || '').trim()) o.deploy = merged
+        else delete o.deploy
       }
+      return { branch: r.branch, overrides: o }
     }))
-    setFormTab('default')
     setGroup(p.group || '')
     setScheduleCron(p.schedule || '')
     const pv = (cfg.variables || {}) as Record<string, string>
@@ -357,27 +349,6 @@ export default function Pipelines() {
     }))
   }
 
-  function toggleBuildOverride(i: number, on: boolean) {
-    patchBranch(i, { buildOn: on })
-    if (!on) {
-      setBranchOverride(i, (o) => {
-        delete o.dockerfilePath
-        delete o.buildContext
-        if (o.execution) {
-          delete o.execution.buildAgent
-          if (Object.keys(o.execution).length === 0) delete o.execution
-        }
-      })
-    }
-  }
-
-  function toggleDeployOverride(i: number, on: boolean) {
-    patchBranch(i, { deployOn: on })
-    if (!on) {
-      setBranchOverride(i, (o) => { delete o.deploy })
-    }
-  }
-
   function tagPreview() {
     let text = tagTemplate
     for (const [k, v] of Object.entries(TAG_VARS)) text = text.split('{' + k + '}').join(v)
@@ -390,10 +361,30 @@ export default function Pipelines() {
     try {
       const branchRules = branches
         .filter((b) => b.branch.trim())
-        .map((b) => ({ branch: b.branch.trim(), overrides: b.overrides }))
+        .map((b) => {
+          const overrides: Record<string, unknown> = {}
+          const o = b.overrides || {}
+          const dockerfile = String(o.dockerfilePath || '').trim()
+          if (dockerfile) overrides.dockerfilePath = dockerfile
+          const agent = String(o.execution?.buildAgent || '').trim()
+          if (agent) overrides.execution = { buildAgent: agent }
+          const dep = (o.deploy || {}) as Record<string, unknown>
+          const targetId = Number(dep.targetId || 0)
+          const name = String(dep.name || '').trim()
+          if (targetId > 0 || name) {
+            overrides.deploy = {
+              targetId,
+              name,
+              namespace: String(dep.namespace || ''),
+              kind: String(dep.kind || 'Deployment'),
+              approval: Boolean(dep.approval),
+            }
+          } else if (dep.targetId === 0 && dep.name === '') {
+            overrides.deploy = { targetId: 0, name: '' }
+          }
+          return { branch: b.branch.trim(), overrides }
+        })
       const config: Record<string, unknown> = { imageName, registryId, tagTemplate }
-      if (dockerfilePath.trim()) config.dockerfilePath = dockerfilePath.trim()
-      if (buildContext.trim()) config.buildContext = buildContext.trim()
       const pipelineGroup = group.trim()
       const cronVal = scheduleCron.trim()
       const notifyConfig = { channels: notifyBindings.map((b) => ({ id: b.channelId, events: b.events })) }
@@ -402,18 +393,6 @@ export default function Pipelines() {
         if (v.key.trim()) varsObj[v.key.trim()] = v.value
       }
       if (Object.keys(varsObj).length > 0) config.variables = varsObj
-      if (deployName) {
-        config.deploy = {
-          targetId: deployTargetId,
-          name: deployName,
-          namespace: deployNamespace,
-          kind: deployKind,
-          approval,
-        }
-      }
-      const execution: Record<string, string> = {}
-      if (buildAgent.trim()) execution.buildAgent = buildAgent.trim()
-      if (Object.keys(execution).length > 0) config.execution = execution
       if (editing) {
         await api('/api/pipelines/' + editing.id, {
           method: 'PATCH',
@@ -533,9 +512,7 @@ export default function Pipelines() {
                           </td>
                         </tr>
                         {items.map((p) => {
-                          const cfg = (p.config || {}) as Record<string, any>
-                          const d = (cfg.deploy || {}) as Record<string, any>
-                          const ex = (cfg.execution || {}) as Record<string, string>
+                          const { d, ex } = pipelineSummaryConfig(p)
                           return (
                             <tr key={p.id} className="group border-b border-line/70 last:border-0 hover:bg-surface-2/60">
                               <td className="px-4 py-3">
@@ -644,9 +621,7 @@ export default function Pipelines() {
                       <span className="font-normal text-faint">{items.length}</span>
                     </div>
                     {items.map((p) => {
-                      const cfg = (p.config || {}) as Record<string, any>
-                      const d = (cfg.deploy || {}) as Record<string, any>
-                      const ex = (cfg.execution || {}) as Record<string, string>
+                      const { d, ex } = pipelineSummaryConfig(p)
                       return (
                         <div key={p.id} className="border-b border-line/70 px-4 py-4 last:border-0">
                           <div className="flex items-start justify-between gap-3">
@@ -722,24 +697,6 @@ export default function Pipelines() {
         }
       >
         <div className="space-y-7">
-          <div className="-mt-1 flex gap-1 border-b border-line">
-            {[
-              { key: 'default', label: '默认配置' },
-              { key: 'branches', label: `分支覆盖 ${branches.length}` },
-            ].map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setFormTab(t.key as 'default' | 'branches')}
-                className={`-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
-                  formTab === t.key ? 'border-brand text-ink' : 'border-transparent text-muted hover:text-ink'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className={formTab === 'default' ? 'space-y-7' : 'hidden'}>
           <FormSection title="来源" description="一条流水线绑定一个仓库，仓库地址与凭据在「代码仓库」中维护。">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="代码仓库">
@@ -759,7 +716,7 @@ export default function Pipelines() {
             </div>
           </FormSection>
 
-          <FormSection title="构建与推送" description="镜像名只允许小写字母、数字、点、下划线和连字符。">
+          <FormSection title="构建与推送" description="镜像仓库、镜像名和 Tag 模板由所有分支共用；Tag 里的 {branch} 用于区分分支。">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="镜像仓库">
                 <Select value={registryId} onChange={(e) => setRegistryId(Number(e.target.value))}>
@@ -784,74 +741,25 @@ export default function Pipelines() {
                 预览：{preview.text}
               </div>
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field label="Dockerfile 路径" hint="相对仓库根目录；留空使用仓库扫描到的 Dockerfile。">
-                <Input value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} placeholder="Dockerfile" className="font-mono text-xs" />
-              </Field>
-              <Field label="构建上下文" hint="相对仓库根目录；留空使用仓库根目录。">
-                <Input value={buildContext} onChange={(e) => setBuildContext(e.target.value)} placeholder="." className="font-mono text-xs" />
-              </Field>
-            </div>
-            <div className="mt-4">
-              {executionField('构建执行器', buildAgent, setBuildAgent, 'pull / build / push 由该执行器执行；未选择时由服务端本机执行；选中后若执行器不在线，步骤会排队等待。')}
-              <div className="mt-2 text-[11px] text-faint">
-                <Link to="/agents" className="text-brand hover:underline">管理执行器</Link>
-                <span className="ml-2">· 执行器需在线且具备对应能力</span>
-              </div>
-            </div>
           </FormSection>
 
-          <FormSection title="部署" description="留空名称则只构建推送，不执行部署。">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="部署目标">
-                <Select value={deployTargetId} onChange={(e) => setDeployTargetId(Number(e.target.value))}>
-                  <option value={0}>选择部署目标…</option>
-                  {dts.map((t) => <option key={t.id} value={t.id}>{t.name}{t.agentName ? ' · ' + t.agentName : ''}</option>)}
-                </Select>
-              </Field>
-              <Field label="Workload 类型">
-                <Select value={deployKind} onChange={(e) => setDeployKind(e.target.value)}>
-                  {WORKLOAD_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                </Select>
-              </Field>
-              <Field label="Workload 名称">
-                <Input value={deployName} onChange={(e) => setDeployName(e.target.value)} placeholder="workload 名称" />
-              </Field>
-              <Field label="命名空间" hint="留空使用部署目标的默认命名空间。">
-                <Input value={deployNamespace} onChange={(e) => setDeployNamespace(e.target.value)} placeholder="default" />
-              </Field>
-            </div>
-            <div className="mt-2 text-[11px] text-faint">部署执行器由所选部署环境绑定；未绑定执行器时由服务端本机执行。</div>
-            <label className="mt-4 flex items-start gap-2 text-xs text-muted">
-              <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand" />
-              <span>部署前需要审批<span className="ml-1 text-faint">审批始终在服务端执行，不会下发到执行器。</span></span>
-            </label>
-          </FormSection>
-
-          </div>
-          <div className={formTab === 'branches' ? 'space-y-7' : 'hidden'}>
-          <FormSection title="分支覆盖" description="按顺序匹配，首个命中的规则生效；未覆盖的字段继承默认配置。">
-            <div className="space-y-3">
+          <FormSection title="分支配置" description="每条分支是一份完整配置；按顺序匹配，首个命中的规则生效。第一条为手动运行默认分支。">
+            <div className="space-y-4">
               {branches.map((b, i) => {
                 const o = b.overrides || {}
-                const exec = (o.execution || {}) as Record<string, any>
                 const dep = (o.deploy || {}) as Record<string, any>
-                const noDeploy = dep.targetId === 0 && dep.name === ''
-                const target = dep.targetId ? dts.find((t) => t.id === Number(dep.targetId)) : undefined
-                const deployValue = noDeploy ? -1 : Number(dep.targetId || 0)
-                const summary = [
-                  b.buildOn ? '构建覆盖' : '',
-                  noDeploy ? '不部署' : target ? '部署 ' + target.name : dep.name ? '部署 ' + dep.name : '',
-                ].filter(Boolean).join(' · ') || '继承默认'
+                const targetId = Number(dep.targetId || 0)
+                const target = dts.find((t) => t.id === targetId)
                 return (
                   <div key={i} className="rounded-md border border-line bg-surface-2/40 p-3">
                     <div className="flex items-center gap-1.5">
                       <Input
                         value={b.branch}
                         onChange={(e) => patchBranch(i, { branch: e.target.value })}
-                        placeholder="** 或 release/*"
+                        placeholder="main 或 release/*"
                         className="flex-1 font-mono text-xs"
                       />
+                      {i === 0 ? <span className="shrink-0 rounded border border-copper/30 bg-copper/10 px-1.5 py-0.5 text-[10px] text-copper">默认</span> : null}
                       <Button type="button" variant="ghost" size="sm" onClick={() => moveBranch(i, -1)} disabled={i === 0} title="上移">
                         <ChevronUp size={14} />
                       </Button>
@@ -862,128 +770,111 @@ export default function Pipelines() {
                         <X size={14} />
                       </Button>
                     </div>
-                    <div className="mt-2 text-[11px] text-faint">{summary}</div>
-                    <div className="mt-3 flex flex-wrap gap-4">
-                      <label className="flex items-center gap-2 text-xs text-muted">
-                        <input type="checkbox" checked={b.buildOn} onChange={(e) => toggleBuildOverride(i, e.target.checked)} className="h-4 w-4 accent-brand" />
-                        覆盖构建
-                      </label>
-                      <label className="flex items-center gap-2 text-xs text-muted">
-                        <input type="checkbox" checked={b.deployOn} onChange={(e) => toggleDeployOverride(i, e.target.checked)} className="h-4 w-4 accent-brand" />
-                        覆盖部署
-                      </label>
-                    </div>
-                    {b.buildOn && (
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <Field label="Dockerfile 路径">
-                          <Input
-                            value={String(o.dockerfilePath || '')}
-                            onChange={(e) => setBranchOverride(i, (x) => { if (e.target.value) x.dockerfilePath = e.target.value; else delete x.dockerfilePath })}
-                            placeholder={dockerfilePath || '继承默认'}
-                            className="font-mono text-xs"
-                          />
-                        </Field>
-                        <Field label="构建上下文">
-                          <Input
-                            value={String(o.buildContext || '')}
-                            onChange={(e) => setBranchOverride(i, (x) => { if (e.target.value) x.buildContext = e.target.value; else delete x.buildContext })}
-                            placeholder={buildContext || '继承默认'}
-                            className="font-mono text-xs"
-                          />
-                        </Field>
-                        <div className="sm:col-span-2">
-                          <Field label="构建执行器" hint="留空继承默认构建执行器。">
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      {executionField(
+                        '构建执行器',
+                        String(o.execution?.buildAgent || ''),
+                        (v) => setBranchOverride(i, (x) => {
+                          if (!v) {
+                            if (x.execution) {
+                              delete x.execution.buildAgent
+                              if (Object.keys(x.execution).length === 0) delete x.execution
+                            }
+                          } else {
+                            x.execution = { ...(x.execution || {}), buildAgent: v }
+                          }
+                        }),
+                        'pull / build / push 由该执行器执行；未选择时由服务端本机执行。',
+                      )}
+                      <Field label="Dockerfile 路径" hint="相对仓库根目录；留空使用 Dockerfile。">
+                        <Input
+                          value={String(o.dockerfilePath || '')}
+                          onChange={(e) => setBranchOverride(i, (x) => {
+                            if (e.target.value) x.dockerfilePath = e.target.value
+                            else delete x.dockerfilePath
+                          })}
+                          placeholder="Dockerfile"
+                          className="font-mono text-xs"
+                        />
+                      </Field>
+                      <Field label="部署环境">
+                        <Select
+                          value={targetId}
+                          onChange={(e) => {
+                            const v = Number(e.target.value)
+                            setBranchOverride(i, (x) => {
+                              if (v === 0) x.deploy = { targetId: 0, name: '' }
+                              else x.deploy = {
+                                ...(x.deploy || {}),
+                                targetId: v,
+                                name: String(x.deploy?.name || ''),
+                                kind: String(x.deploy?.kind || 'Deployment'),
+                                namespace: '',
+                                approval: Boolean(x.deploy?.approval),
+                              }
+                            })
+                          }}
+                        >
+                          <option value={0}>不部署</option>
+                          {dts.map((t) => <option key={t.id} value={t.id}>{t.name}{t.agentName ? ' · ' + t.agentName : ''}</option>)}
+                        </Select>
+                      </Field>
+                      {targetId > 0 ? (
+                        <>
+                          <Field label="Workload 类型">
                             <Select
-                              value={String(exec.buildAgent || '')}
-                              onChange={(e) => {
-                                const v = e.target.value
-                                setBranchOverride(i, (x) => {
-                                  if (!v) {
-                                    if (x.execution) {
-                                      delete x.execution.buildAgent
-                                      if (Object.keys(x.execution).length === 0) delete x.execution
-                                    }
-                                  } else {
-                                    x.execution = { ...(x.execution || {}), buildAgent: v }
-                                  }
-                                })
-                              }}
+                              value={String(dep.kind || 'Deployment')}
+                              onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), kind: e.target.value } })}
                             >
-                              <option value="">继承默认</option>
-                              {agents.map((a) => (
-                                <option key={a.id} value={'agent=' + a.id}>
-                                  {a.name}{a.status !== 'online' ? `（${a.status === 'disabled' ? '已禁用' : '离线'}）` : ''}
-                                </option>
-                              ))}
+                              {WORKLOAD_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
                             </Select>
                           </Field>
-                        </div>
-                      </div>
-                    )}
-                    {b.deployOn && (
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <Field label="部署目标">
-                          <Select
-                            value={deployValue}
-                            onChange={(e) => {
-                              const v = Number(e.target.value)
-                              setBranchOverride(i, (x) => {
-                                if (v === 0) delete x.deploy
-                                else if (v === -1) x.deploy = { targetId: 0, name: '' }
-                                else x.deploy = { ...(x.deploy || {}), targetId: v, name: '' }
-                              })
-                            }}
-                          >
-                            <option value={0}>继承默认部署</option>
-                            <option value={-1}>不部署</option>
-                            {dts.map((t) => <option key={t.id} value={t.id}>{t.name}{t.agentName ? ' · ' + t.agentName : ''}</option>)}
-                          </Select>
-                        </Field>
-                        <Field label="Workload 类型">
-                          <Input
-                            value={String(dep.kind || '')}
-                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), kind: e.target.value } })}
-                            placeholder={'继承：' + deployKind}
-                            className="font-mono text-xs"
-                          />
-                        </Field>
-                        <Field label="Workload 名称">
-                          <Input
-                            value={String(dep.name === '' ? '' : dep.name || '')}
-                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), name: e.target.value } })}
-                            placeholder={'继承：' + (deployName || '不设置')}
-                          />
-                        </Field>
-                        <Field label="命名空间" hint="切换部署目标时留空会使用新目标的默认命名空间。">
-                          <Input
-                            value={String(dep.namespace || '')}
-                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), namespace: e.target.value } })}
-                            placeholder={'继承：' + (target?.defaultNamespace || deployNamespace || 'default')}
-                            className="font-mono text-xs"
-                          />
-                        </Field>
-                        <label className="flex items-center gap-2 text-xs text-muted sm:col-span-2">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(dep.approval)}
-                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), approval: e.target.checked } })}
-                            className="h-4 w-4 accent-brand"
-                          />
-                          该分支部署前需要审批
-                        </label>
-                      </div>
-                    )}
+                          <Field label="Workload 名称">
+                            <Input
+                              value={String(dep.name || '')}
+                              onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), name: e.target.value } })}
+                              placeholder="workload 名称"
+                            />
+                          </Field>
+                          <Field label="命名空间" hint="留空使用部署环境的默认命名空间。">
+                            <Input
+                              value={String(dep.namespace || '')}
+                              onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), namespace: e.target.value } })}
+                              placeholder={target?.defaultNamespace || 'default'}
+                              className="font-mono text-xs"
+                            />
+                          </Field>
+                          <label className="flex items-center gap-2 text-xs text-muted sm:col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(dep.approval)}
+                              onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), approval: e.target.checked } })}
+                              className="h-4 w-4 accent-brand"
+                            />
+                            该分支部署前需要审批
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 )
               })}
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setBranches([...branches, { branch: '', overrides: {}, buildOn: false, deployOn: false }])} className="mt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-3"
+              onClick={() => {
+                const last = branches[branches.length - 1]
+                setBranches([...branches, { branch: '', overrides: last ? JSON.parse(JSON.stringify(last.overrides)) : {} }])
+              }}
+            >
               <Plus size={14} />
               添加分支
             </Button>
           </FormSection>
-          </div>
-          <div className={formTab === 'default' ? 'space-y-7' : 'hidden'}>
 
           <FormSection title="流水线变量" description="覆盖同名全局变量；敏感值不会回显。">
             <div className="space-y-2">
@@ -1080,7 +971,6 @@ export default function Pipelines() {
               添加通道
             </Button>
           </FormSection>
-          </div>
         </div>
       </Drawer>
       <Toast toast={toast} />

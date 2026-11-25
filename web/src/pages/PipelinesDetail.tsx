@@ -88,8 +88,9 @@ export default function PipelinesDetail() {
 
   const latest = runs[0]
   const cfg = (pipeline?.config || {}) as Record<string, any>
-  const deploy = (cfg.deploy || {}) as Record<string, any>
-  const exec = (cfg.execution || {}) as Record<string, string>
+  const firstBranch = ((pipeline?.branchRules?.[0]?.overrides || {}) as Record<string, any>)
+  const deploy = { ...(cfg.deploy || {}), ...(firstBranch.deploy || {}) } as Record<string, any>
+  const exec = { ...(cfg.execution || {}), ...(firstBranch.execution || {}) } as Record<string, string>
 
   function executionName(selector?: string) {
     if (!selector) return '服务端本机'
