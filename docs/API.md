@@ -17,6 +17,7 @@
 | 2026-11-24 | 通知通道新增 `systemAlerts`；新增 §11.2 执行器上线/离线告警事件 |
 | 2026-11-24 | 部署目标新增 `agentId` 绑定执行器；部署步骤由目标自动派生执行器，流水线移除 `execution.deployAgent`；`POST /api/deploy-targets/{id}/test` 支持经绑定 agent 远程测试 |
 | 2026-11-25 | 审批决策持久化（`Run.approvalDecision`，重启恢复，重复决定 409）；分支覆盖按 deploy/execution/variables 深合并；新增 Dockerfile/构建上下文默认与分支覆盖；webhook/cron 去重带 ref |
+| 2026-11-25 | 通知增加部署信息：`run.finished` 可带 `deploy` 对象（集群/服务/命名空间/状态/执行器/错误），IM 与邮件同步展示 |
 
 ---
 
@@ -279,7 +280,11 @@ POST /api/webhooks
 run 达终态后 POST 到 NotifyConfig.webhookUrl：
 
 - Header: X-Navori-Signature: sha256=HMAC(secret, body)
-- body: { event: "run.finished", pipelineId, repo, branch, commit, commitShort, status, imageTag, error, startedAt, finishedAt }
+- body: { event: "run.finished", pipelineId, repo, branch, commit, commitShort, status, imageTag, error, startedAt, finishedAt, deploy? }
+- `deploy` 仅在有部署步骤时存在：`{ targetId, targetName, kind, name, namespace, status, executor, error }`
+  - `targetName` 为部署环境名称；`executor` 为执行器名称，服务端本机为「服务端本机」
+  - `status` 为 deploy step 状态（success/failed/skipped/cancelled）；`error` 为失败/跳过原因
+- IM / 邮件通知也会附带同一份部署信息（集群/服务/命名空间/执行器/部署结果），仅当存在 deploy 步骤。
 - 重试：3 次指数退避；失败仅记日志，不阻断 run
 
 ### 11.1 通知通道

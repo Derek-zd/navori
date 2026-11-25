@@ -371,6 +371,9 @@ func (s *Server) notifyTerminal(run *store.Run, repo *store.Repository) {
 		"error":         fresh.Error,
 		"finishedAt":    timeStr(fresh.FinishedAt),
 	}
+	if deploy := s.deployEvent(&fresh); deploy != nil {
+		ev["deploy"] = deploy
+	}
 
 	// legacy single webhook
 	if url, _ := nf["webhookUrl"].(string); url != "" {

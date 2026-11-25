@@ -130,7 +130,7 @@ func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 		return fmt.Errorf("%s channel missing webhook", typ)
 	}
 	status, _ := ev["status"].(string)
-	pipeline, _ := ev["pipelineId"].(float64)
+	pipeline := eventUint(ev, "pipelineId")
 	repo, _ := ev["repo"].(string)
 	group, _ := ev["pipelineGroup"].(string)
 	image, _ := ev["imageTag"].(string)
@@ -141,7 +141,7 @@ func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 	if !isAgent {
 		name := repo
 		if name == "" {
-			name = fmt.Sprintf("流水线 #%.0f", pipeline)
+			name = fmt.Sprintf("流水线 #%d", pipeline)
 		}
 		displayName := name
 		if group != "" {
@@ -149,10 +149,14 @@ func sendIM(typ string, cfg map[string]interface{}, ev Event) error {
 		}
 		mdTitle = fmt.Sprintf("**%s %s**", statusIcon(status), displayName)
 		// feishu text messages do not render markdown; keep plain lines
-		plainLine = fmt.Sprintf("%s %s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+		plainLine = fmt.Sprintf("%s %s\n状态: %s\n流水线: #%d\n分支: %s\n镜像: %s\ncommit: %s",
 			statusIcon(status), displayName, status, pipeline, branch, image, commit)
-		mdLine = fmt.Sprintf("%s\n状态: %s\n流水线: #%.0f\n分支: %s\n镜像: %s\ncommit: %s",
+		mdLine = fmt.Sprintf("%s\n状态: %s\n流水线: #%d\n分支: %s\n镜像: %s\ncommit: %s",
 			mdTitle, status, pipeline, branch, image, commit)
+	}
+	if deploy := deployNotificationText(ev); deploy != "" {
+		plainLine += "\n" + deploy
+		mdLine += "\n" + deploy
 	}
 	var payload interface{}
 	switch typ {
@@ -197,7 +201,7 @@ func sendEmail(cfg map[string]interface{}, ev Event) error {
 	}
 	addr := host + ":" + strconv.Itoa(port)
 	status, _ := ev["status"].(string)
-	pipeline, _ := ev["pipelineId"].(float64)
+	pipeline := eventUint(ev, "pipelineId")
 	repo, _ := ev["repo"].(string)
 	subject := ""
 	body := ""
@@ -207,10 +211,13 @@ func sendEmail(cfg map[string]interface{}, ev Event) error {
 	} else {
 		name := repo
 		if name == "" {
-			name = fmt.Sprintf("流水线 #%.0f", pipeline)
+			name = fmt.Sprintf("流水线 #%d", pipeline)
 		}
 		subject = fmt.Sprintf("[Navori] %s 状态: %s", name, status)
-		body = fmt.Sprintf("流水线: %s (#%.0f)\n状态: %s\n镜像: %v\n错误: %v", name, pipeline, status, ev["imageTag"], ev["error"])
+		body = fmt.Sprintf("流水线: %s (#%d)\n状态: %s\n镜像: %v\n错误: %v", name, pipeline, status, ev["imageTag"], ev["error"])
+		if deploy := deployNotificationText(ev); deploy != "" {
+			body += "\n\n" + deploy
+		}
 	}
 	msg := []byte("To: " + toRaw + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n")
 	auth := smtp.PlainAuth("", username, password, host)
@@ -218,4 +225,64 @@ func sendEmail(cfg map[string]interface{}, ev Event) error {
 		return fmt.Errorf("send email: %w", err)
 	}
 	return nil
+}
+
+// eventUint reads a numeric event field regardless of whether it was built
+// in-process (uint) or decoded from JSON (float64).
+func eventUint(ev Event, key string) uint64 {
+	switch v := ev[key].(type) {
+	case uint:
+		return uint64(v)
+	case uint64:
+		return v
+	case int:
+		return uint64(v)
+	case int64:
+		return uint64(v)
+	case float64:
+		return uint64(v)
+	}
+	return 0
+}
+
+// deployNotificationText formats the deploy block for IM and email channels.
+func deployNotificationText(ev Event) string {
+	raw, ok := ev["deploy"].(map[string]interface{})
+	if !ok || len(raw) == 0 {
+		return ""
+	}
+	text := func(key string) string {
+		if v, ok := raw[key].(string); ok {
+			return v
+		}
+		return ""
+	}
+	lines := []string{
+		"部署: " + text("targetName"),
+		"服务: " + text("name") + " (" + text("kind") + ")",
+		"命名空间: " + text("namespace"),
+		"执行器: " + text("executor"),
+		"部署结果: " + deployStatusLabel(text("status")),
+	}
+	if msg := text("error"); msg != "" {
+		lines = append(lines, "原因: "+msg)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func deployStatusLabel(status string) string {
+	switch status {
+	case "success":
+		return "成功"
+	case "failed":
+		return "失败"
+	case "skipped":
+		return "跳过"
+	case "cancelled":
+		return "已取消"
+	case "":
+		return "—"
+	default:
+		return status
+	}
 }

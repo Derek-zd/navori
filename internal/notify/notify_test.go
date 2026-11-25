@@ -37,3 +37,34 @@ func TestAgentEventFormatting(t *testing.T) {
 		t.Fatal("run events must not be treated as agent events")
 	}
 }
+
+func TestDeployNotificationText(t *testing.T) {
+	ev := Event{
+		"pipelineId": uint(12),
+		"deploy": map[string]interface{}{
+			"targetName": "xs-k8s",
+			"kind":       "Deployment",
+			"name":       "webapp",
+			"namespace":  "prod",
+			"status":     "success",
+			"executor":   "xs-deploy",
+			"error":      "",
+		},
+	}
+	text := deployNotificationText(ev)
+	for _, want := range []string{"xs-k8s", "webapp", "Deployment", "prod", "xs-deploy", "成功"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("deploy text missing %q: %q", want, text)
+		}
+	}
+	if eventUint(ev, "pipelineId") != 12 {
+		t.Fatalf("pipelineId = %d", eventUint(ev, "pipelineId"))
+	}
+
+	ev["deploy"].(map[string]interface{})["status"] = "failed"
+	ev["deploy"].(map[string]interface{})["error"] = "rollout failed"
+	text = deployNotificationText(ev)
+	if !strings.Contains(text, "失败") || !strings.Contains(text, "rollout failed") {
+		t.Fatalf("failed deploy text: %q", text)
+	}
+}
