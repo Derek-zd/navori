@@ -31,6 +31,10 @@ type Server struct {
 	cancelMu sync.Mutex
 	cancels  map[uint]context.CancelFunc
 	runWG    sync.WaitGroup
+	notifyWG sync.WaitGroup
+
+	branchMu    sync.Mutex
+	branchCache map[uint]cachedBranch
 
 	stepMu    sync.Mutex
 	stepWaits map[uint]chan stepResult

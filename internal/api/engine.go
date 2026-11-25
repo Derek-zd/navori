@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func (s *Server) executeRun(run *store.Run, repo *store.Repository, branch strin
 	ctx, cancel := context.WithCancel(context.Background())
 	s.setCancel(run.ID, cancel)
 	defer s.clearCancel(run.ID)
-	defer s.notifyTerminal(run, repo)
+	defer s.notifyTerminalAsync(run, repo)
 
 	var steps []store.Step
 	s.DB.DB.Where("run_id = ?", run.ID).Order("step_order").Find(&steps)
@@ -329,6 +330,19 @@ func (s *Server) stepDeploy(ctx context.Context, w io.Writer, rc resolvedConfig,
 	})
 }
 
+// notifyTerminalAsync sends terminal notifications without holding the run
+// goroutine while a slow REST endpoint or SMTP server retries.
+func (s *Server) notifyTerminalAsync(run *store.Run, repo *store.Repository) {
+	if run == nil || repo == nil {
+		return
+	}
+	s.notifyWG.Add(1)
+	go func() {
+		defer s.notifyWG.Done()
+		s.notifyTerminal(run, repo)
+	}()
+}
+
 // notifyTerminal sends notifications when a run reaches a terminal state.
 func (s *Server) notifyTerminal(run *store.Run, repo *store.Repository) {
 	var fresh store.Run
@@ -442,6 +456,8 @@ func (s *Server) resolveImageTag(run *store.Run, repo *store.Repository, branch 
 	return s.computeImageTag(run, repo, branch, config)
 }
 
+var tagVarPattern = regexp.MustCompile(`\{var\.([A-Za-z0-9_]+)\}`)
+
 // computeImageTag renders the tag template and builds the full image reference.
 func (s *Server) computeImageTag(run *store.Run, repo *store.Repository, branch string, config map[string]interface{}) (string, error) {
 	rc := parseResolvedConfig(config)
@@ -468,11 +484,22 @@ func (s *Server) computeImageTag(run *store.Run, repo *store.Repository, branch 
 		"unix":         strconv.FormatInt(time.Now().Unix(), 10),
 		"build_number": strconv.Itoa(run.Number),
 	}
-	var varsList []store.Variable
-	s.DB.DB.Find(&varsList)
-	for _, v := range varsList {
-		if val, err := s.Sec.Decrypt(v.ValueEnc); err == nil {
-			vars["var."+v.Key] = val
+	// Only decrypt variables actually referenced by the tag template.
+	needed := map[string]bool{}
+	for _, m := range tagVarPattern.FindAllStringSubmatch(tagTemplate, -1) {
+		needed[m[1]] = true
+	}
+	if len(needed) > 0 {
+		keys := make([]string, 0, len(needed))
+		for k := range needed {
+			keys = append(keys, k)
+		}
+		var varsList []store.Variable
+		s.DB.DB.Where("key IN ?", keys).Find(&varsList)
+		for _, v := range varsList {
+			if val, err := s.Sec.Decrypt(v.ValueEnc); err == nil {
+				vars["var."+v.Key] = val
+			}
 		}
 	}
 	for k, val := range rc.Variables {

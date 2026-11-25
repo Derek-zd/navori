@@ -98,12 +98,31 @@ func (s *Server) pickRunBranch(p *store.Pipeline, repo *store.Repository) string
 // hard-coded "main" even though the remote default is e.g. "master"). Callers
 // that target the default branch (manual run without ref, cron) use this BEFORE
 // matching branch rules, so rules and the branch actually pulled stay in sync.
+type cachedBranch struct {
+	value string
+	at    time.Time
+}
+
+const defaultBranchTTL = 30 * time.Second
+
 func (s *Server) resolveDefaultBranch(repo *store.Repository) string {
+	s.branchMu.Lock()
+	if c, ok := s.branchCache[repo.ID]; ok && c.value != "" && time.Since(c.at) < defaultBranchTTL {
+		s.branchMu.Unlock()
+		return c.value
+	}
+	s.branchMu.Unlock()
 	if b, err := gitx.RemoteDefaultBranch(s.cloneURL(repo)); err == nil && b != "" {
 		if b != repo.DefaultBranch {
 			repo.DefaultBranch = b
 			s.DB.DB.Model(repo).Update("default_branch", b)
 		}
+		s.branchMu.Lock()
+		if s.branchCache == nil {
+			s.branchCache = map[uint]cachedBranch{}
+		}
+		s.branchCache[repo.ID] = cachedBranch{value: b, at: time.Now()}
+		s.branchMu.Unlock()
 		return b
 	}
 	if repo.DefaultBranch == "" {

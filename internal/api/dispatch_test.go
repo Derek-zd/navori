@@ -37,6 +37,7 @@ func newDispatchTestServer(t *testing.T) (*Server, *gorm.DB) {
 		}
 		s.cancelMu.Unlock()
 		s.runWG.Wait()
+		s.notifyWG.Wait()
 	})
 	return s, st.DB
 }

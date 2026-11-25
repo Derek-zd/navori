@@ -96,7 +96,7 @@ func (s *Server) continueApprovedRun(run *store.Run) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.setCancel(run.ID, cancel)
 	defer s.clearCancel(run.ID)
-	defer s.notifyTerminal(run, repo)
+	defer s.notifyTerminalAsync(run, repo)
 
 	imageTag := run.ImageTag
 	if imageTag == "" {
@@ -132,7 +132,7 @@ func (s *Server) finalizeRejectedRun(run *store.Run) {
 	}
 	s.DB.DB.Model(run).Updates(map[string]interface{}{"status": "rejected", "error": errRejected.Error(), "finished_at": nowPtr()})
 	if repo != nil {
-		s.notifyTerminal(run, repo)
+		s.notifyTerminalAsync(run, repo)
 	}
 }
 
@@ -179,7 +179,7 @@ func (s *Server) cancelAwaitingRun(run *store.Run) bool {
 		Where("run_id = ? AND status IN ?", run.ID, []string{"pending", "queued", "running"}).
 		Updates(map[string]interface{}{"status": "skipped", "lease_expires_at": nil})
 	if repo, err := s.pipelineRepo(run.PipelineID); err == nil {
-		s.notifyTerminal(run, repo)
+		s.notifyTerminalAsync(run, repo)
 	}
 	return true
 }
