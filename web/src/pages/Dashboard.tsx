@@ -344,7 +344,11 @@ export default function Dashboard() {
                       </div>
                       <div className="mt-1.5 truncate font-mono text-[11px] text-muted">{r.ref}</div>
                       <div className="mt-1 truncate text-[11px] text-faint">
-                        {r.error || (r.status === 'awaiting_approval' ? '等待人工审批后继续' : '运行未成功完成')}
+                        {r.status === 'rejected'
+                          ? r.rejectedReason || '审批拒绝'
+                          : r.status === 'awaiting_approval'
+                            ? '等待人工审批后继续'
+                            : r.error || '运行未成功完成'}
                       </div>
                     </div>
                     <ArrowUpRight size={13} className="mt-1 shrink-0 text-faint" />
