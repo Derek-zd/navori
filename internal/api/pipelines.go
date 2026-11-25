@@ -374,6 +374,8 @@ func (s *Server) validateBranchRules(raw []byte) error {
 				if count == 0 {
 					return fmt.Errorf("branchRules[%d] (%s): deploy target %d not found", i, branch, uint(id))
 				}
+				// "name" is the workload name when targetId is set; it is not a target name.
+				continue
 			}
 		}
 		if name, _ := deploy["name"].(string); name != "" {

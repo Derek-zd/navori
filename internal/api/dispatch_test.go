@@ -355,3 +355,15 @@ func TestTriggerDeployStepUsesTargetAgent(t *testing.T) {
 		t.Fatalf("deploy selector = %q, want %q", step.AgentSelector, want)
 	}
 }
+
+func TestValidateBranchRulesAllowsWorkloadNameWithTargetID(t *testing.T) {
+	s, db := newDispatchTestServer(t)
+	dt := store.DeployTarget{Name: "xs-k8s", Type: "k8s"}
+	if err := db.Create(&dt).Error; err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`[{"branch":"main","overrides":{"deploy":{"targetId":` + strconv.FormatUint(uint64(dt.ID), 10) + `,"name":"webapp"}}}]`)
+	if err := s.validateBranchRules(raw); err != nil {
+		t.Fatalf("workload name must not be treated as a deploy target name: %v", err)
+	}
+}
