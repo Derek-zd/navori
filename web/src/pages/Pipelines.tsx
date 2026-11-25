@@ -37,6 +37,13 @@ const NOTIFY_EVENTS: [string, string][] = [
   ['rejected', '拒绝'],
 ]
 const ALL_NOTIFY_EVENTS = NOTIFY_EVENTS.map(([ev]) => ev)
+type BranchDraft = {
+  branch: string
+  overrides: Record<string, any>
+  buildOn: boolean
+  deployOn: boolean
+}
+
 const TAG_VARS: Record<string, string> = {
   branch: 'main',
   branch_raw: 'main',
@@ -68,13 +75,17 @@ export default function Pipelines() {
   const [deployKind, setDeployKind] = useState('Deployment')
   const [approval, setApproval] = useState(false)
   const [buildAgent, setBuildAgent] = useState('')
-  const [branches, setBranches] = useState<string[]>(['**'])
+  const [dockerfilePath, setDockerfilePath] = useState('')
+  const [buildContext, setBuildContext] = useState('')
+  const [branches, setBranches] = useState<BranchDraft[]>([{ branch: '**', overrides: {}, buildOn: false, deployOn: false }])
+  const [formTab, setFormTab] = useState<'default' | 'branches'>('default')
   const [group, setGroup] = useState('')
   const [scheduleCron, setScheduleCron] = useState('')
   const [notifyChannels, setNotifyChannels] = useState<NotifyChannel[]>([])
   const [notifyBindings, setNotifyBindings] = useState<{ channelId: number; events: string[] }[]>([])
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
+  const [runMenu, setRunMenu] = useState<number | null>(null)
   const { toast, setToast } = useToast()
 
   async function load() {
@@ -100,12 +111,53 @@ export default function Pipelines() {
     load().catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (runMenu === null) return
+    const close = () => setRunMenu(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [runMenu])
+
   function repoName(id: number) {
     return repos.find((r) => r.id === id)?.name || ('#' + id)
   }
 
   function deployTargetName(id: number) {
     return dts.find((t) => t.id === id)?.name || ''
+  }
+
+  function branchRuleLabel(r: { branch: string; overrides?: Record<string, unknown> }) {
+    const dep = r.overrides?.deploy as { targetId?: number; name?: string } | undefined
+    if (!dep) return r.branch
+    if (dep.targetId === 0) return r.branch + ' → 不部署'
+    const target = deployTargetName(dep.targetId || 0)
+    return r.branch + (target ? ' → ' + target : '')
+  }
+
+  function runMenuItems(p: Pipeline) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => { setRunMenu(null); run(p.id) }}
+          className="flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-xs text-ink hover:bg-surface-2"
+        >
+          <span>默认分支</span>
+          <span className="font-mono text-[10px] text-faint">{p.branchRules?.[0]?.branch || '**'}</span>
+        </button>
+        {(p.branchRules || []).map((r) => (
+          <button
+            key={r.branch}
+            type="button"
+            onClick={() => { setRunMenu(null); run(p.id, r.branch) }}
+            className="flex w-full items-center justify-between gap-3 rounded px-2.5 py-2 text-left text-xs text-ink hover:bg-surface-2"
+          >
+            <span className="truncate">{branchRuleLabel(r)}</span>
+            <Play size={11} className="shrink-0 text-faint" />
+          </button>
+        ))}
+      </>
+    )
   }
 
   function selectorAgentID(selector: string): number | null {
@@ -226,7 +278,10 @@ export default function Pipelines() {
     setDeployKind('Deployment')
     setApproval(false)
     setBuildAgent('')
-    setBranches(['**'])
+    setDockerfilePath('')
+    setBuildContext('')
+    setBranches([{ branch: '**', overrides: {}, buildOn: false, deployOn: false }])
+    setFormTab('default')
     setGroup('')
     setScheduleCron('')
     setPipeVars([])
@@ -254,7 +309,20 @@ export default function Pipelines() {
     setApproval(Boolean(d.approval))
     const ex = (cfg.execution || {}) as Record<string, any>
     setBuildAgent(String(ex.buildAgent || ''))
-    setBranches((p.branchRules || []).map((r) => r.branch))
+    setDockerfilePath(String(cfg.dockerfilePath || ''))
+    setBuildContext(String(cfg.buildContext || ''))
+    setBranches((p.branchRules || []).map((r) => {
+      const o = (r.overrides || {}) as Record<string, any>
+      const exec = (o.execution || {}) as Record<string, any>
+      const dep = (o.deploy || {}) as Record<string, any>
+      return {
+        branch: r.branch,
+        overrides: o,
+        buildOn: Boolean(o.dockerfilePath || o.buildContext || exec.buildAgent),
+        deployOn: Boolean(dep.targetId !== undefined || dep.name !== undefined),
+      }
+    }))
+    setFormTab('default')
     setGroup(p.group || '')
     setScheduleCron(p.schedule || '')
     const pv = (cfg.variables || {}) as Record<string, string>
@@ -276,6 +344,40 @@ export default function Pipelines() {
     setBranches(n)
   }
 
+  function patchBranch(i: number, patch: Partial<BranchDraft>) {
+    setBranches((prev) => prev.map((b, j) => (j === i ? { ...b, ...patch } : b)))
+  }
+
+  function setBranchOverride(i: number, updater: (o: Record<string, any>) => void) {
+    setBranches((prev) => prev.map((b, j) => {
+      if (j !== i) return b
+      const o = JSON.parse(JSON.stringify(b.overrides || {})) as Record<string, any>
+      updater(o)
+      return { ...b, overrides: o }
+    }))
+  }
+
+  function toggleBuildOverride(i: number, on: boolean) {
+    patchBranch(i, { buildOn: on })
+    if (!on) {
+      setBranchOverride(i, (o) => {
+        delete o.dockerfilePath
+        delete o.buildContext
+        if (o.execution) {
+          delete o.execution.buildAgent
+          if (Object.keys(o.execution).length === 0) delete o.execution
+        }
+      })
+    }
+  }
+
+  function toggleDeployOverride(i: number, on: boolean) {
+    patchBranch(i, { deployOn: on })
+    if (!on) {
+      setBranchOverride(i, (o) => { delete o.deploy })
+    }
+  }
+
   function tagPreview() {
     let text = tagTemplate
     for (const [k, v] of Object.entries(TAG_VARS)) text = text.split('{' + k + '}').join(v)
@@ -286,8 +388,12 @@ export default function Pipelines() {
   async function save() {
     setCreating(true)
     try {
-      const branchRules = branches.filter((b) => b.trim()).map((b) => ({ branch: b.trim() }))
+      const branchRules = branches
+        .filter((b) => b.branch.trim())
+        .map((b) => ({ branch: b.branch.trim(), overrides: b.overrides }))
       const config: Record<string, unknown> = { imageName, registryId, tagTemplate }
+      if (dockerfilePath.trim()) config.dockerfilePath = dockerfilePath.trim()
+      if (buildContext.trim()) config.buildContext = buildContext.trim()
       const pipelineGroup = group.trim()
       const cronVal = scheduleCron.trim()
       const notifyConfig = { channels: notifyBindings.map((b) => ({ id: b.channelId, events: b.events })) }
@@ -341,9 +447,9 @@ export default function Pipelines() {
     }
   }
 
-  async function run(id: number) {
+  async function run(id: number, ref?: string) {
     try {
-      await api('/api/pipelines/' + id + '/run', { method: 'POST', body: '{}' })
+      await api('/api/pipelines/' + id + '/run', { method: 'POST', body: JSON.stringify(ref ? { ref } : {}) })
       setToast({ type: 'success', text: '已触发运行' })
       await load()
     } catch (e) {
@@ -460,7 +566,7 @@ export default function Pipelines() {
                               <td className="hidden px-4 py-3 md:table-cell">
                                 <div className="flex flex-wrap gap-1">
                                   {(p.branchRules || []).map((r) => (
-                                    <span key={r.branch} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                                    <span key={r.branch} title={branchRuleLabel(r)} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
                                       {r.branch}
                                     </span>
                                   ))}
@@ -499,10 +605,20 @@ export default function Pipelines() {
                               </td>
                               <td className="whitespace-nowrap px-4 py-3">
                                 <div className="flex items-center justify-end gap-0.5">
-                                  <Button variant="ghost" size="sm" onClick={() => run(p.id)} title="运行">
-                                    <Play size={14} />
-                                    <span className="hidden sm:inline">运行</span>
-                                  </Button>
+                                  <div className="relative inline-flex items-center">
+                                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); run(p.id) }} title="运行默认分支">
+                                      <Play size={14} />
+                                      <span className="hidden sm:inline">运行</span>
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="px-1" onClick={(e) => { e.stopPropagation(); setRunMenu(runMenu === p.id ? null : p.id) }} title="选择分支">
+                                      <ChevronDown size={11} />
+                                    </Button>
+                                    {runMenu === p.id ? (
+                                      <div className="absolute bottom-full right-0 z-20 mb-1 w-56 rounded-md border border-line bg-surface p-1 shadow-overlay">
+                                        {runMenuItems(p)}
+                                      </div>
+                                    ) : null}
+                                  </div>
                                   <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>编辑</Button>
                                   <Button variant="ghost" size="sm" onClick={() => remove(p.id)} className="text-danger hover:bg-danger/10" title="删除">
                                     <Trash2 size={14} />
@@ -545,7 +661,7 @@ export default function Pipelines() {
                           </div>
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             {(p.branchRules || []).map((r) => (
-                              <span key={r.branch} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">{r.branch}</span>
+                              <span key={r.branch} className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">{branchRuleLabel(r)}</span>
                             ))}
                             {p.lastRun ? <span className="text-[10px] text-faint">#{p.lastRun.number} · {timeAgo(p.lastRun.startedAt || p.lastRun.finishedAt)}</span> : null}
                           </div>
@@ -557,9 +673,19 @@ export default function Pipelines() {
                             <div className="mt-1 truncate text-[10px] text-faint">执行 {executionSummary(ex.buildAgent || '', d.targetId || 0)}</div>
                           </div>
                           <div className="mt-3 flex items-center gap-1">
-                            <Button variant="secondary" size="sm" onClick={() => run(p.id)}>
-                              <Play size={13} />运行
-                            </Button>
+                            <div className="relative inline-flex items-center">
+                              <Button variant="secondary" size="sm" className="rounded-r-none" onClick={(e) => { e.stopPropagation(); run(p.id) }} title="运行默认分支">
+                                <Play size={13} />运行
+                              </Button>
+                              <Button variant="secondary" size="sm" className="rounded-l-none border-l-0 px-2" onClick={(e) => { e.stopPropagation(); setRunMenu(runMenu === p.id ? null : p.id) }} title="选择分支">
+                                <ChevronDown size={11} />
+                              </Button>
+                              {runMenu === p.id ? (
+                                <div className="absolute bottom-full left-0 z-20 mb-1 w-56 rounded-md border border-line bg-surface p-1 shadow-overlay">
+                                  {runMenuItems(p)}
+                                </div>
+                              ) : null}
+                            </div>
                             <Link to={'/pipelines/' + p.id} className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-surface-2 hover:text-ink">详情</Link>
                             <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>编辑</Button>
                             <Button variant="ghost" size="sm" onClick={() => remove(p.id)} className="ml-auto text-danger hover:bg-danger/10" title="删除">
@@ -596,6 +722,24 @@ export default function Pipelines() {
         }
       >
         <div className="space-y-7">
+          <div className="-mt-1 flex gap-1 border-b border-line">
+            {[
+              { key: 'default', label: '默认配置' },
+              { key: 'branches', label: `分支覆盖 ${branches.length}` },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setFormTab(t.key as 'default' | 'branches')}
+                className={`-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                  formTab === t.key ? 'border-brand text-ink' : 'border-transparent text-muted hover:text-ink'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className={formTab === 'default' ? 'space-y-7' : 'hidden'}>
           <FormSection title="来源" description="一条流水线绑定一个仓库，仓库地址与凭据在「代码仓库」中维护。">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="代码仓库">
@@ -640,6 +784,14 @@ export default function Pipelines() {
                 预览：{preview.text}
               </div>
             </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Field label="Dockerfile 路径" hint="相对仓库根目录；留空使用仓库扫描到的 Dockerfile。">
+                <Input value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} placeholder="Dockerfile" className="font-mono text-xs" />
+              </Field>
+              <Field label="构建上下文" hint="相对仓库根目录；留空使用仓库根目录。">
+                <Input value={buildContext} onChange={(e) => setBuildContext(e.target.value)} placeholder="." className="font-mono text-xs" />
+              </Field>
+            </div>
             <div className="mt-4">
               {executionField('构建执行器', buildAgent, setBuildAgent, 'pull / build / push 由该执行器执行；未选择时由服务端本机执行；选中后若执行器不在线，步骤会排队等待。')}
               <div className="mt-2 text-[11px] text-faint">
@@ -676,37 +828,162 @@ export default function Pipelines() {
             </label>
           </FormSection>
 
-          <FormSection title="触发规则" description="按顺序匹配，首个命中的规则生效。">
-            <div className="space-y-2">
-              {branches.map((b, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <Input
-                    value={b}
-                    onChange={(e) => {
-                      const n = [...branches]
-                      n[i] = e.target.value
-                      setBranches(n)
-                    }}
-                    placeholder="** 或 release/*"
-                    className="flex-1 font-mono text-xs"
-                  />
-                  <Button type="button" variant="ghost" size="sm" onClick={() => moveBranch(i, -1)} disabled={i === 0} title="上移">
-                    <ChevronUp size={14} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => moveBranch(i, 1)} disabled={i === branches.length - 1} title="下移">
-                    <ChevronDown size={14} />
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setBranches(branches.filter((_, j) => j !== i))} title="删除">
-                    <X size={14} />
-                  </Button>
-                </div>
-              ))}
+          </div>
+          <div className={formTab === 'branches' ? 'space-y-7' : 'hidden'}>
+          <FormSection title="分支覆盖" description="按顺序匹配，首个命中的规则生效；未覆盖的字段继承默认配置。">
+            <div className="space-y-3">
+              {branches.map((b, i) => {
+                const o = b.overrides || {}
+                const exec = (o.execution || {}) as Record<string, any>
+                const dep = (o.deploy || {}) as Record<string, any>
+                const noDeploy = dep.targetId === 0 && dep.name === ''
+                const target = dep.targetId ? dts.find((t) => t.id === Number(dep.targetId)) : undefined
+                const deployValue = noDeploy ? -1 : Number(dep.targetId || 0)
+                const summary = [
+                  b.buildOn ? '构建覆盖' : '',
+                  noDeploy ? '不部署' : target ? '部署 ' + target.name : dep.name ? '部署 ' + dep.name : '',
+                ].filter(Boolean).join(' · ') || '继承默认'
+                return (
+                  <div key={i} className="rounded-md border border-line bg-surface-2/40 p-3">
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        value={b.branch}
+                        onChange={(e) => patchBranch(i, { branch: e.target.value })}
+                        placeholder="** 或 release/*"
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Button type="button" variant="ghost" size="sm" onClick={() => moveBranch(i, -1)} disabled={i === 0} title="上移">
+                        <ChevronUp size={14} />
+                      </Button>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => moveBranch(i, 1)} disabled={i === branches.length - 1} title="下移">
+                        <ChevronDown size={14} />
+                      </Button>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setBranches(branches.filter((_, j) => j !== i))} title="删除">
+                        <X size={14} />
+                      </Button>
+                    </div>
+                    <div className="mt-2 text-[11px] text-faint">{summary}</div>
+                    <div className="mt-3 flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 text-xs text-muted">
+                        <input type="checkbox" checked={b.buildOn} onChange={(e) => toggleBuildOverride(i, e.target.checked)} className="h-4 w-4 accent-brand" />
+                        覆盖构建
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-muted">
+                        <input type="checkbox" checked={b.deployOn} onChange={(e) => toggleDeployOverride(i, e.target.checked)} className="h-4 w-4 accent-brand" />
+                        覆盖部署
+                      </label>
+                    </div>
+                    {b.buildOn && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <Field label="Dockerfile 路径">
+                          <Input
+                            value={String(o.dockerfilePath || '')}
+                            onChange={(e) => setBranchOverride(i, (x) => { if (e.target.value) x.dockerfilePath = e.target.value; else delete x.dockerfilePath })}
+                            placeholder={dockerfilePath || '继承默认'}
+                            className="font-mono text-xs"
+                          />
+                        </Field>
+                        <Field label="构建上下文">
+                          <Input
+                            value={String(o.buildContext || '')}
+                            onChange={(e) => setBranchOverride(i, (x) => { if (e.target.value) x.buildContext = e.target.value; else delete x.buildContext })}
+                            placeholder={buildContext || '继承默认'}
+                            className="font-mono text-xs"
+                          />
+                        </Field>
+                        <div className="sm:col-span-2">
+                          <Field label="构建执行器" hint="留空继承默认构建执行器。">
+                            <Select
+                              value={String(exec.buildAgent || '')}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                setBranchOverride(i, (x) => {
+                                  if (!v) {
+                                    if (x.execution) {
+                                      delete x.execution.buildAgent
+                                      if (Object.keys(x.execution).length === 0) delete x.execution
+                                    }
+                                  } else {
+                                    x.execution = { ...(x.execution || {}), buildAgent: v }
+                                  }
+                                })
+                              }}
+                            >
+                              <option value="">继承默认</option>
+                              {agents.map((a) => (
+                                <option key={a.id} value={'agent=' + a.id}>
+                                  {a.name}{a.status !== 'online' ? `（${a.status === 'disabled' ? '已禁用' : '离线'}）` : ''}
+                                </option>
+                              ))}
+                            </Select>
+                          </Field>
+                        </div>
+                      </div>
+                    )}
+                    {b.deployOn && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <Field label="部署目标">
+                          <Select
+                            value={deployValue}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              setBranchOverride(i, (x) => {
+                                if (v === 0) delete x.deploy
+                                else if (v === -1) x.deploy = { targetId: 0, name: '' }
+                                else x.deploy = { ...(x.deploy || {}), targetId: v, name: '' }
+                              })
+                            }}
+                          >
+                            <option value={0}>继承默认部署</option>
+                            <option value={-1}>不部署</option>
+                            {dts.map((t) => <option key={t.id} value={t.id}>{t.name}{t.agentName ? ' · ' + t.agentName : ''}</option>)}
+                          </Select>
+                        </Field>
+                        <Field label="Workload 类型">
+                          <Input
+                            value={String(dep.kind || '')}
+                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), kind: e.target.value } })}
+                            placeholder={'继承：' + deployKind}
+                            className="font-mono text-xs"
+                          />
+                        </Field>
+                        <Field label="Workload 名称">
+                          <Input
+                            value={String(dep.name === '' ? '' : dep.name || '')}
+                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), name: e.target.value } })}
+                            placeholder={'继承：' + (deployName || '不设置')}
+                          />
+                        </Field>
+                        <Field label="命名空间" hint="切换部署目标时留空会使用新目标的默认命名空间。">
+                          <Input
+                            value={String(dep.namespace || '')}
+                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), namespace: e.target.value } })}
+                            placeholder={'继承：' + (target?.defaultNamespace || deployNamespace || 'default')}
+                            className="font-mono text-xs"
+                          />
+                        </Field>
+                        <label className="flex items-center gap-2 text-xs text-muted sm:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(dep.approval)}
+                            onChange={(e) => setBranchOverride(i, (x) => { x.deploy = { ...(x.deploy || {}), approval: e.target.checked } })}
+                            className="h-4 w-4 accent-brand"
+                          />
+                          该分支部署前需要审批
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setBranches([...branches, ''])} className="mt-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setBranches([...branches, { branch: '', overrides: {}, buildOn: false, deployOn: false }])} className="mt-3">
               <Plus size={14} />
               添加分支
             </Button>
           </FormSection>
+          </div>
+          <div className={formTab === 'default' ? 'space-y-7' : 'hidden'}>
 
           <FormSection title="流水线变量" description="覆盖同名全局变量；敏感值不会回显。">
             <div className="space-y-2">
@@ -803,6 +1080,7 @@ export default function Pipelines() {
               添加通道
             </Button>
           </FormSection>
+          </div>
         </div>
       </Drawer>
       <Toast toast={toast} />

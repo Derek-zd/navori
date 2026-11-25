@@ -138,6 +138,7 @@ export interface Run {
   imageTag: string
   error: string
   approvalRequired: boolean
+  approvalDecision?: string
   approvedBy: string
   rejectedReason: string
   steps: Step[]

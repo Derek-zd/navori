@@ -103,6 +103,14 @@ export default function PipelinesDetail() {
   const deployTarget = deployTargets.find((t) => t.id === Number(deploy.targetId || 0))
   const deployAgentName = deployTarget ? (deployTarget.agentName || '服务端本机') : '未配置'
 
+  function branchTargetLabel(overrides?: Record<string, unknown>) {
+    const dep = overrides?.deploy as { targetId?: number; name?: string } | undefined
+    if (!dep) return ''
+    if (dep.targetId === 0) return '不部署'
+    const target = deployTargets.find((t) => t.id === dep.targetId)
+    return target?.name || '未指定目标'
+  }
+
   const stages = useMemo<Stage[]>(() => {
     const byName = new Map<string, Step>((latest?.steps || []).map((s) => [s.name, s]))
     return STAGES.map(({ key, label }) => {
@@ -288,7 +296,17 @@ export default function PipelinesDetail() {
               <div className="flex justify-between gap-3"><dt className="text-faint">部署</dt><dd className="text-right text-ink">{hasDeploy ? `${deploy.kind || 'Deployment'} / ${deploy.name}` : '仅构建'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">部署执行器</dt><dd className="max-w-[170px] truncate text-right text-ink" title={deployAgentName}>{hasDeploy ? deployAgentName : '—'}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-faint">审批</dt><dd className="text-ink">{approval ? '需要' : '不需要'}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-faint">分支规则</dt><dd className="max-w-[170px] text-right font-mono text-[10px] text-ink">{(pipeline.branchRules || []).map((b) => b.branch).join(', ') || '—'}</dd></div>
+              <div className="flex justify-between gap-3">
+                <dt className="shrink-0 text-faint">分支规则</dt>
+                <dd className="max-w-[190px] space-y-1 text-right font-mono text-[10px] text-ink">
+                  {(pipeline.branchRules || []).length === 0 ? '—' : (pipeline.branchRules || []).map((b) => (
+                    <div key={b.branch}>
+                      {b.branch}
+                      {branchTargetLabel(b.overrides) ? <span className="text-faint"> → {branchTargetLabel(b.overrides)}</span> : null}
+                    </div>
+                  ))}
+                </dd>
+              </div>
               <div className="flex justify-between gap-3"><dt className="text-faint">定时</dt><dd className="font-mono text-[11px] text-ink">{pipeline.schedule || '—'}</dd></div>
             </dl>
           </Card>
